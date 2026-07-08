@@ -12,7 +12,7 @@ import pandas as pd
 from scipy.stats import norm
 
 
-DATA_FILE = ROOT / "stuff" / "20260205_option_minute_prices_expiry.csv"
+DATA_FILE = ROOT / "data" / "20260205_option_minute_prices_expiry.csv"
 OUTPUT_DIR = ROOT / "data_analysis"
 EXPIRY_TIME = pd.Timestamp("2026-02-05 15:30:00")
 SNAPSHOT_MINUTE = 110000

@@ -1,5 +1,6 @@
 .agents/
 .codex/
 .mplconfig/
+artifacts/
 HFT_CAMP_CODE.ipynb
 TODO.md

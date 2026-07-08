@@ -2,6 +2,6 @@
 .codex/
 .mplconfig/
 __pycache__/
-artifacts/
+artifacts/checkpoints/
 HFT_CAMP_CODE.ipynb
 TODO.md

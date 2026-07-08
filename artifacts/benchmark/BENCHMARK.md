@@ -1,46 +1,46 @@
 # Benchmark Report
 
-- Benchmark run date: `2026-07-08T14:15:13.002077Z`
-- Test set size: `12` paths
+- Benchmark run date: `2026-07-08T17:09:26.888599Z`
+- Test set size: `2000` paths
 - Random seed: `42`
 
 ## Regime: gbm
 
 | Model | Mean P&L | Std Dev | VaR 5% | CVaR 5% | Total Tx Cost | Downside Dev |
 | --- | --- | --- | --- | --- | --- | --- |
-| Black-Scholes delta (no tx cost) | -171.570465 | 10.072200 | -186.210281 | 186.210281 | 0.000000 | 171.865860 |
-| Black-Scholes delta (with tx cost) | -378.220490 | 63.428982 | -484.977844 | 484.977844 | 2686.449707 | 383.502197 |
-| deep_hedger_v1 | -130.814651 | 117.228340 | -453.047638 | 453.047638 | 0.000000 | 175.655792 |
-| deep_hedger_v2 | -189.284943 | 172.071655 | -674.559998 | 674.559998 | 418.348694 | 255.807434 |
-| deep_hedger_v3 | -157.205673 | 91.229874 | -387.780334 | 387.780334 | 477.885132 | 181.759506 |
+| Black-Scholes delta (no tx cost) | -171.638672 | 7.334928 | -183.736115 | 188.488556 | 0.000000 | 171.795334 |
+| Black-Scholes delta (with tx cost) | -356.185577 | 62.367668 | -459.806732 | 480.486938 | 369093.781250 | 361.604614 |
+| deep_hedger_v1 | -171.998672 | 124.875610 | -414.773651 | 500.483002 | 0.000000 | 212.549896 |
+| deep_hedger_v2 | -254.397781 | 40.745171 | -314.750122 | 332.162201 | 164136.609375 | 257.640045 |
+| deep_hedger_v3 | -214.576782 | 132.118073 | -459.294434 | 539.447144 | 80176.109375 | 251.988861 |
 
 ### Improvement vs Black-Scholes baseline
 
 | Model | Mean P&L | Std Dev | VaR 5% | CVaR 5% | Total Tx Cost | Downside Dev |
 | --- | --- | --- | --- | --- | --- | --- |
 | Metric Direction | higher better | lower better | higher better | lower better | lower better | lower better |
-| deep_hedger_v1 | 23.75% | 1063.88% | -143.30% | 143.30% | n/a | 2.21% |
-| deep_hedger_v2 | -10.32% | 1608.38% | -262.26% | 262.26% | n/a | 48.84% |
-| deep_hedger_v3 | 8.37% | 805.76% | -108.25% | 108.25% | n/a | 5.76% |
+| deep_hedger_v1 | -0.21% | 1602.48% | -125.74% | 165.52% | n/a | 23.72% |
+| deep_hedger_v2 | -48.22% | 455.50% | -71.31% | 76.22% | n/a | 49.97% |
+| deep_hedger_v3 | -25.02% | 1701.22% | -149.98% | 186.20% | n/a | 46.68% |
 
 ## Regime: jump_diffusion
 
 | Model | Mean P&L | Std Dev | VaR 5% | CVaR 5% | Total Tx Cost | Downside Dev |
 | --- | --- | --- | --- | --- | --- | --- |
-| Black-Scholes delta (no tx cost) | -194.030197 | 73.864922 | -449.042480 | 449.042480 | 0.000000 | 207.614426 |
-| Black-Scholes delta (with tx cost) | -420.215973 | 67.040779 | -610.456909 | 610.456909 | 2940.415039 | 425.530182 |
-| deep_hedger_v1 | -121.707047 | 94.722054 | -369.193909 | 369.193909 | 0.000000 | 154.223450 |
-| deep_hedger_v2 | -180.234558 | 143.878983 | -589.818604 | 589.818604 | 443.950684 | 230.620163 |
-| deep_hedger_v3 | -145.721710 | 77.019127 | -333.291077 | 333.291077 | 475.332336 | 164.823456 |
+| Black-Scholes delta (no tx cost) | -185.528702 | 141.394394 | -186.714508 | 460.628448 | 0.000000 | 233.266525 |
+| Black-Scholes delta (with tx cost) | -371.278412 | 148.324982 | -469.017944 | 704.404785 | 371499.406250 | 399.809906 |
+| deep_hedger_v1 | -185.612167 | 203.056000 | -452.283630 | 762.919617 | 0.000000 | 275.106567 |
+| deep_hedger_v2 | -267.810883 | 155.271347 | -322.567688 | 616.540405 | 164466.500000 | 309.567200 |
+| deep_hedger_v3 | -225.932922 | 196.791885 | -503.296997 | 778.511414 | 78188.523438 | 299.620972 |
 
 ### Improvement vs Black-Scholes baseline
 
 | Model | Mean P&L | Std Dev | VaR 5% | CVaR 5% | Total Tx Cost | Downside Dev |
 | --- | --- | --- | --- | --- | --- | --- |
 | Metric Direction | higher better | lower better | higher better | lower better | lower better | lower better |
-| deep_hedger_v1 | 37.27% | 28.24% | 17.78% | -17.78% | n/a | -25.72% |
-| deep_hedger_v2 | 7.11% | 94.79% | -31.35% | 31.35% | n/a | 11.08% |
-| deep_hedger_v3 | 24.90% | 4.27% | 25.78% | -25.78% | n/a | -20.61% |
+| deep_hedger_v1 | -0.04% | 43.61% | -142.23% | 65.63% | n/a | 17.94% |
+| deep_hedger_v2 | -44.35% | 9.81% | -72.76% | 33.85% | n/a | 32.71% |
+| deep_hedger_v3 | -21.78% | 39.18% | -169.55% | 69.01% | n/a | 28.45% |
 
 ## Model Changes
 

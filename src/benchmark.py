@@ -24,8 +24,39 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rate", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-ratio", type=float, default=0.2)
+    parser.add_argument("--validation-ratio", type=float, default=0.1)
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--run-tag", default="")
     return parser.parse_args()
+
+
+def load_checkpoint_metadata(checkpoint_path: Path) -> dict:
+    return torch.load(checkpoint_path, map_location="cpu", weights_only=False)["metadata"]
+
+
+def is_checkpoint_compatible(metadata: dict, args: argparse.Namespace) -> tuple[bool, str]:
+    dataset_config = metadata.get("dataset_config", {})
+    required_pairs = {
+        "csv_path": args.csv_path,
+        "expiry_time": args.expiry_time,
+        "num_paths": args.num_paths,
+        "volatility": args.volatility,
+        "rate": args.rate,
+        "seed": args.seed,
+        "test_ratio": args.test_ratio,
+        "validation_ratio": args.validation_ratio,
+    }
+    for key, expected_value in required_pairs.items():
+        if dataset_config.get(key) != expected_value:
+            return False, f"{key} mismatch (checkpoint={dataset_config.get(key)!r}, expected={expected_value!r})"
+
+    if args.run_tag and metadata.get("run_tag", "") != args.run_tag:
+        return False, f"run_tag mismatch (checkpoint={metadata.get('run_tag', '')!r}, expected={args.run_tag!r})"
+
+    if not metadata.get("selection_metric"):
+        return False, "missing selection_metric metadata"
+
+    return True, ""
 
 
 def compute_metrics(pnl: torch.Tensor, costs: torch.Tensor) -> dict[str, float]:
@@ -177,6 +208,8 @@ def main() -> None:
         "# Benchmark Report",
         "",
         f"- Benchmark run date: `{datetime.utcnow().isoformat()}Z`",
+        f"- Run tag filter: `{args.run_tag or 'none'}`",
+        f"- Dataset split: `train {int((1.0 - args.test_ratio - args.validation_ratio) * 100)}% / validation {int(args.validation_ratio * 100)}% / test {int(args.test_ratio * 100)}%`",
         f"- Test set size: `{int(args.num_paths * args.test_ratio)}` paths",
         f"- Random seed: `{args.seed}`",
         "",
@@ -185,9 +218,9 @@ def main() -> None:
     raw_pnl_outputs: dict[str, np.ndarray] = {}
     discovered_models: list[dict] = []
 
-    checkpoint_paths = sorted(checkpoints_dir.glob("*.pt"))
+    checkpoint_paths = sorted(path for path in checkpoints_dir.glob("deep_hedger_v*.pt") if not path.name.endswith("_last.pt"))
     for checkpoint_path in checkpoint_paths:
-        metadata = torch.load(checkpoint_path, map_location="cpu", weights_only=False)["metadata"]
+        metadata = load_checkpoint_metadata(checkpoint_path)
         discovered_models.append(metadata)
 
     for regime in regimes:
@@ -200,6 +233,7 @@ def main() -> None:
             rate=args.rate,
             seed=args.seed,
             test_ratio=args.test_ratio,
+            validation_ratio=args.validation_ratio,
         )
 
         summary_rows: list[tuple[str, dict[str, float]]] = []
@@ -222,10 +256,16 @@ def main() -> None:
         raw_pnl_outputs[f"{regime}__bs_with_tx_cost"] = bs_cost_pnl
 
         missing_models = []
+        skipped_models: list[str] = []
         for version, spec in MODEL_SPECS.items():
             checkpoint_path = checkpoints_dir / f"{spec.name}.pt"
             if not checkpoint_path.exists():
                 missing_models.append(spec.name)
+                continue
+            metadata = load_checkpoint_metadata(checkpoint_path)
+            compatible, reason = is_checkpoint_compatible(metadata, args)
+            if not compatible:
+                skipped_models.append(f"{spec.name}: {reason}")
                 continue
             metrics, pnl, metadata = evaluate_checkpoint(
                 checkpoint_path=checkpoint_path,
@@ -251,6 +291,11 @@ def main() -> None:
         if missing_models:
             report_sections.append(f"Missing checkpoints for this run: `{', '.join(missing_models)}`")
             report_sections.append("")
+        if skipped_models:
+            report_sections.append("Skipped checkpoints due to incompatible training config:")
+            for line in skipped_models:
+                report_sections.append(f"- {line}")
+            report_sections.append("")
 
     report_sections.extend(["## Model Changes", ""])
     for version, spec in MODEL_SPECS.items():
@@ -261,12 +306,19 @@ def main() -> None:
         if not checkpoint_path.exists():
             report_sections.append("- Checkpoint status: missing")
         else:
-            metadata = torch.load(checkpoint_path, map_location="cpu", weights_only=False)["metadata"]
-            report_sections.append(f"- Checkpoint status: available")
+            metadata = load_checkpoint_metadata(checkpoint_path)
+            compatible, reason = is_checkpoint_compatible(metadata, args)
+            if compatible:
+                report_sections.append(f"- Checkpoint status: available")
+            else:
+                report_sections.append(f"- Checkpoint status: skipped")
+                report_sections.append(f"- Skip reason: {reason}")
+            report_sections.append("- Checkpoint type: best validation CVaR checkpoint")
             report_sections.append(f"- Features: `{', '.join(metadata['features'])}`")
             report_sections.append(f"- Hidden dims: `{metadata['hidden_dims']}`")
             report_sections.append(f"- Transaction cost rate: `{metadata['transaction_cost_rate']}`")
             report_sections.append(f"- Default regime: `{metadata['dataset_config']['regime']}`")
+            report_sections.append(f"- Run tag: `{metadata.get('run_tag', '')}`")
         report_sections.append("")
 
     (output_dir / "BENCHMARK.md").write_text("\n".join(report_sections))

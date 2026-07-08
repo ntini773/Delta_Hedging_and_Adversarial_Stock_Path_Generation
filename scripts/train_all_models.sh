@@ -13,10 +13,14 @@ EPOCHS="${EPOCHS:-100}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
 LEARNING_RATE="${LEARNING_RATE:-0.001}"
 SEED="${SEED:-42}"
+VALIDATION_RATIO="${VALIDATION_RATIO:-0.1}"
+TEST_RATIO="${TEST_RATIO:-0.2}"
+RUN_TAG="${RUN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
 
 mkdir -p "$CHECKPOINT_DIR"
+printf '%s\n' "$RUN_TAG" > "$CHECKPOINT_DIR/latest_run_tag.txt"
 
-echo "Training v1 on GPU 0"
+echo "Training v1 on GPU 0 (run tag: $RUN_TAG)"
 CUDA_VISIBLE_DEVICES=0 python -m src.train \
   --model-version v1 \
   --regime gbm \
@@ -27,11 +31,14 @@ CUDA_VISIBLE_DEVICES=0 python -m src.train \
   --batch-size "$BATCH_SIZE" \
   --learning-rate "$LEARNING_RATE" \
   --seed "$SEED" \
+  --test-ratio "$TEST_RATIO" \
+  --validation-ratio "$VALIDATION_RATIO" \
+  --run-tag "$RUN_TAG" \
   --device cuda \
   --output-dir "$CHECKPOINT_DIR" &
 PID_V1=$!
 
-echo "Training v2 on GPU 1"
+echo "Training v2 on GPU 1 (run tag: $RUN_TAG)"
 CUDA_VISIBLE_DEVICES=1 python -m src.train \
   --model-version v2 \
   --regime gbm \
@@ -42,11 +49,14 @@ CUDA_VISIBLE_DEVICES=1 python -m src.train \
   --batch-size "$BATCH_SIZE" \
   --learning-rate "$LEARNING_RATE" \
   --seed "$SEED" \
+  --test-ratio "$TEST_RATIO" \
+  --validation-ratio "$VALIDATION_RATIO" \
+  --run-tag "$RUN_TAG" \
   --device cuda \
   --output-dir "$CHECKPOINT_DIR" &
 PID_V2=$!
 
-echo "Training v3 on GPU 2"
+echo "Training v3 on GPU 2 (run tag: $RUN_TAG)"
 CUDA_VISIBLE_DEVICES=2 python -m src.train \
   --model-version v3 \
   --regime jump_diffusion \
@@ -57,6 +67,9 @@ CUDA_VISIBLE_DEVICES=2 python -m src.train \
   --batch-size "$BATCH_SIZE" \
   --learning-rate "$LEARNING_RATE" \
   --seed "$SEED" \
+  --test-ratio "$TEST_RATIO" \
+  --validation-ratio "$VALIDATION_RATIO" \
+  --run-tag "$RUN_TAG" \
   --device cuda \
   --output-dir "$CHECKPOINT_DIR" &
 PID_V3=$!

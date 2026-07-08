@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import copy
 from datetime import datetime
 from pathlib import Path
 
@@ -23,11 +24,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rate", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-ratio", type=float, default=0.2)
+    parser.add_argument("--validation-ratio", type=float, default=0.1)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output-dir", default="artifacts/checkpoints")
+    parser.add_argument("--run-tag", default="")
     return parser.parse_args()
 
 
@@ -96,6 +99,7 @@ def main() -> None:
         rate=args.rate,
         seed=args.seed,
         test_ratio=args.test_ratio,
+        validation_ratio=args.validation_ratio,
     )
     spec = MODEL_SPECS[args.model_version]
     device = args.device
@@ -113,6 +117,10 @@ def main() -> None:
 
     generator = torch.Generator(device="cpu")
     generator.manual_seed(args.seed)
+    best_validation_cvar = float("inf")
+    best_epoch = -1
+    best_state_dict = None
+    best_validation_metrics = None
 
     for epoch in range(args.epochs):
         permutation = torch.randperm(train_paths.shape[0], generator=generator)
@@ -150,12 +158,47 @@ def main() -> None:
             optimizer.step()
             epoch_losses.append(float(loss.item()))
 
-        print(f"Epoch {epoch + 1:03d}/{args.epochs}: CVaR loss = {sum(epoch_losses) / len(epoch_losses):.6f}")
+        validation_eval = evaluate_model(
+            model=model,
+            model_version=args.model_version,
+            dataset=dataset_bundle["validation"],
+            strike=dataset_bundle["context"]["strike"],
+            option_type=dataset_bundle["context"]["option_type"],
+            transaction_cost_rate=spec.transaction_cost_rate,
+            device=device,
+        )
+        validation_cvar = validation_eval["metrics"]["cvar_5"]
+        if validation_cvar < best_validation_cvar:
+            best_validation_cvar = validation_cvar
+            best_epoch = epoch + 1
+            best_state_dict = copy.deepcopy(model.state_dict())
+            best_validation_metrics = validation_eval["metrics"]
+
+        print(
+            f"Epoch {epoch + 1:03d}/{args.epochs}: "
+            f"train CVaR loss = {sum(epoch_losses) / len(epoch_losses):.6f}, "
+            f"validation CVaR = {validation_cvar:.6f}"
+        )
+
+    if best_state_dict is None:
+        raise RuntimeError("Training finished without selecting a best validation checkpoint.")
+
+    final_state_dict = copy.deepcopy(model.state_dict())
+    model.load_state_dict(best_state_dict)
 
     train_eval = evaluate_model(
         model=model,
         model_version=args.model_version,
         dataset=dataset_bundle["train"],
+        strike=dataset_bundle["context"]["strike"],
+        option_type=dataset_bundle["context"]["option_type"],
+        transaction_cost_rate=spec.transaction_cost_rate,
+        device=device,
+    )
+    validation_eval = evaluate_model(
+        model=model,
+        model_version=args.model_version,
+        dataset=dataset_bundle["validation"],
         strike=dataset_bundle["context"]["strike"],
         option_type=dataset_bundle["context"]["option_type"],
         transaction_cost_rate=spec.transaction_cost_rate,
@@ -186,12 +229,17 @@ def main() -> None:
         "hidden_dims": spec.hidden_dims,
         "transaction_cost_rate": spec.transaction_cost_rate,
         "changes_from_previous": spec.changes_from_previous,
+        "run_tag": args.run_tag,
         "dataset_config": dataset_bundle["config"],
         "context": serializable_context,
+        "best_epoch": best_epoch,
+        "selection_metric": "validation_cvar_5",
         "train_metrics": train_eval["metrics"],
+        "validation_metrics": validation_eval["metrics"],
         "test_metrics": test_eval["metrics"],
     }
 
+    last_checkpoint_base = output_dir / f"{spec.name}_last"
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -199,10 +247,22 @@ def main() -> None:
         },
         checkpoint_base.with_suffix(".pt"),
     )
+    torch.save(
+        {
+            "state_dict": final_state_dict,
+            "metadata": metadata,
+        },
+        last_checkpoint_base.with_suffix(".pt"),
+    )
     checkpoint_base.with_suffix(".json").write_text(json.dumps(metadata, indent=2, default=str))
+    last_checkpoint_base.with_suffix(".json").write_text(json.dumps(metadata, indent=2, default=str))
 
     print("\nSaved checkpoint:")
     print(checkpoint_base.with_suffix(".pt"))
+    print(f"Best validation epoch: {best_epoch}")
+    print("\nValidation metrics:")
+    for key, value in validation_eval["metrics"].items():
+        print(f"  {key}: {value:.6f}")
     print("\nTest metrics:")
     for key, value in test_eval["metrics"].items():
         print(f"  {key}: {value:.6f}")

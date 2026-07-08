@@ -217,27 +217,39 @@ def compute_black_scholes_reference(
     }
 
 
-def split_train_test(
+def split_train_validation_test(
     paths: np.ndarray,
     references: dict[str, np.ndarray],
     test_ratio: float,
+    validation_ratio: float,
     seed: int,
 ) -> dict:
+    if test_ratio <= 0 or validation_ratio <= 0 or test_ratio + validation_ratio >= 1.0:
+        raise ValueError("test_ratio and validation_ratio must be positive and sum to less than 1.")
+
     rng = np.random.default_rng(seed)
     indices = np.arange(paths.shape[0])
     rng.shuffle(indices)
-    split_index = int(paths.shape[0] * (1.0 - test_ratio))
-    train_idx = indices[:split_index]
-    test_idx = indices[split_index:]
+    train_end = int(paths.shape[0] * (1.0 - test_ratio - validation_ratio))
+    validation_end = int(paths.shape[0] * (1.0 - test_ratio))
+    train_idx = indices[:train_end]
+    validation_idx = indices[train_end:validation_end]
+    test_idx = indices[validation_end:]
     return {
         "train": {
             "paths": paths[train_idx],
             **{name: values[train_idx] for name, values in references.items()},
         },
+        "validation": {
+            "paths": paths[validation_idx],
+            **{name: values[validation_idx] for name, values in references.items()},
+        },
         "test": {
             "paths": paths[test_idx],
             **{name: values[test_idx] for name, values in references.items()},
         },
+        "train_indices": train_idx.tolist(),
+        "validation_indices": validation_idx.tolist(),
         "test_indices": test_idx.tolist(),
     }
 
@@ -288,6 +300,7 @@ def prepare_dataset_bundle(
     rate: float,
     seed: int,
     test_ratio: float,
+    validation_ratio: float,
     target_option_symbol: str | None = None,
 ) -> dict:
     context = build_real_market_context(
@@ -313,10 +326,11 @@ def prepare_dataset_bundle(
         option_type=context["option_type"],
         total_horizon_years=context["time_horizon_years"],
     )
-    split = split_train_test(
+    split = split_train_validation_test(
         paths=paths,
         references=references,
         test_ratio=test_ratio,
+        validation_ratio=validation_ratio,
         seed=seed,
     )
     return {
@@ -330,10 +344,14 @@ def prepare_dataset_bundle(
             "rate": rate,
             "seed": seed,
             "test_ratio": test_ratio,
+            "validation_ratio": validation_ratio,
             "target_option_symbol": context["target_option_symbol"],
         },
         "train": split["train"],
+        "validation": split["validation"],
         "test": split["test"],
+        "train_indices": split["train_indices"],
+        "validation_indices": split["validation_indices"],
         "test_indices": split["test_indices"],
     }
 

@@ -38,6 +38,8 @@ python -m src.train --model-version v3 --regime jump_diffusion
 ```
 
 Checkpoints are written to `artifacts/checkpoints/`.
+The canonical checkpoint name, such as `deep_hedger_v2.pt`, is the best checkpoint selected by validation CVaR.
+The final-epoch copy is also saved as `*_last.pt` for inspection.
 
 ## Benchmark Command
 
@@ -70,9 +72,12 @@ bash scripts/run_benchmark.sh
 Both scripts accept overrides through environment variables such as `NUM_PATHS`, `EPOCHS`, `BATCH_SIZE`, `CHECKPOINT_DIR`, and `BENCHMARK_DIR`.
 
 Default `NUM_PATHS` in both bash scripts is `10000`.
+The training script writes a shared `RUN_TAG`, and the benchmark script reuses it so only checkpoints from the same coordinated run are compared by default.
 
 ## Notes
 
 - Default data file: `data/20260205_option_minute_prices_expiry.csv`
+- Default split: `70% train / 10% validation / 20% test`
 - The benchmark never retrains models. Missing checkpoints are reported explicitly.
+- Benchmarking uses the canonical `deep_hedger_v*.pt` checkpoints, which are the best-validation checkpoints.
 - Transaction costs are part of P&L and the loss definition, not the raw CSV data.

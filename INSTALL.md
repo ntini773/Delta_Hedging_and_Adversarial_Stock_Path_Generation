@@ -20,7 +20,7 @@ Restart your shell after installation, or load Pixi into the current shell if ne
 
 ## Local CPU Setup
 
-Clone or enter the project directory:
+Clone or enter the project directory on a `linux-64` machine:
 
 ```bash
 cd deep-hedger
@@ -66,7 +66,7 @@ Move into the project directory:
 cd /path/to/deep-hedger
 ```
 
-This environment is intended for `linux-64` GPU nodes. Do not use the `cuda` environment on macOS local machines.
+This project is configured only for `linux-64`. Use the `cuda` environment on Linux GPU nodes, not on non-Linux local machines.
 
 Install the CUDA-enabled environment:
 
@@ -145,6 +145,6 @@ pixi install -e cuda
 
 ## Notes
 
-- The `default` and `cpu` environments are intended for local CPU development with PyTorch.
+- The `default` and `cpu` environments are intended for local CPU development with PyTorch on `linux-64`.
 - The `cuda` environment is intended for GPU-backed training on Linux GPU nodes with a compatible NVIDIA driver stack.
 - Current repository scaffolding is documentation-first; training and inference scripts are not implemented yet.

@@ -2,8 +2,8 @@
 name = "deep-hedger"
 version = "0.1.0"
 description = "Modular deep hedging MVP scaffold"
-channels = ["pytorch", "nvidia", "conda-forge"]
-platforms = ["linux-64", "osx-64", "osx-arm64"]
+channels = ["conda-forge", "pytorch", "nvidia"]
+platforms = ["linux-64"]
 
 [feature.cpu.dependencies]
 python = "3.12.*"

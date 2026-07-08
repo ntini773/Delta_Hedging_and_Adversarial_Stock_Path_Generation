@@ -62,8 +62,11 @@ def evaluate_checkpoint(checkpoint_path: Path, dataset: dict, context: dict, dev
 
     paths = to_torch(dataset["paths"], device=device)
     bs_deltas = to_torch(dataset["bs_deltas"], device=device)
+    bs_gammas = to_torch(dataset["bs_gammas"], device=device)
+    bs_thetas = to_torch(dataset["bs_thetas"], device=device)
+    bs_vegas = to_torch(dataset["bs_vegas"], device=device)
     time_grid = to_torch(dataset["time_grid"], device=device)
-    implied_vol = torch.full_like(time_grid, fill_value=metadata["dataset_config"]["volatility"])
+    implied_vol = to_torch(dataset["implied_volatility"], device=device)
 
     with torch.no_grad():
         hedge_paths = run_deep_hedger(
@@ -71,6 +74,9 @@ def evaluate_checkpoint(checkpoint_path: Path, dataset: dict, context: dict, dev
             feature_builder=FEATURE_BUILDERS[model_version],
             price_paths=paths,
             bs_deltas=bs_deltas,
+            bs_gammas=bs_gammas,
+            bs_thetas=bs_thetas,
+            bs_vegas=bs_vegas,
             time_to_expiry=time_grid,
             implied_volatility=implied_vol,
             strike=context["strike"],
@@ -260,6 +266,7 @@ def main() -> None:
             report_sections.append(f"- Features: `{', '.join(metadata['features'])}`")
             report_sections.append(f"- Hidden dims: `{metadata['hidden_dims']}`")
             report_sections.append(f"- Transaction cost rate: `{metadata['transaction_cost_rate']}`")
+            report_sections.append(f"- Default regime: `{metadata['dataset_config']['regime']}`")
         report_sections.append("")
 
     (output_dir / "BENCHMARK.md").write_text("\n".join(report_sections))

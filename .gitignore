@@ -1,6 +1,7 @@
 .agents/
 .codex/
 .mplconfig/
+__pycache__/
 artifacts/
 HFT_CAMP_CODE.ipynb
 TODO.md

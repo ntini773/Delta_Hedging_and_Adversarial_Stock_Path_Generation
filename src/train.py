@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-version", default="v1", choices=sorted(MODEL_SPECS.keys()))
     parser.add_argument("--csv-path", default="data/20260205_option_minute_prices_expiry.csv")
     parser.add_argument("--expiry-time", default="2026-02-05 15:30:00")
-    parser.add_argument("--regime", default="gbm", choices=["gbm", "jump_diffusion"])
+    parser.add_argument("--regime", default=None, choices=["gbm", "jump_diffusion"])
     parser.add_argument("--num-paths", type=int, default=1000)
     parser.add_argument("--volatility", type=float, default=0.6)
     parser.add_argument("--rate", type=float, default=0.05)
@@ -44,13 +44,19 @@ def evaluate_model(
     with torch.no_grad():
         paths = to_torch(dataset["paths"], device=device)
         bs_deltas = to_torch(dataset["bs_deltas"], device=device)
+        bs_gammas = to_torch(dataset["bs_gammas"], device=device)
+        bs_thetas = to_torch(dataset["bs_thetas"], device=device)
+        bs_vegas = to_torch(dataset["bs_vegas"], device=device)
         time_grid = to_torch(dataset["time_grid"], device=device)
-        implied_vol = torch.full_like(time_grid, fill_value=0.6)
+        implied_vol = to_torch(dataset["implied_volatility"], device=device)
         hedge_paths = run_deep_hedger(
             model=model,
             feature_builder=FEATURE_BUILDERS[model_version],
             price_paths=paths,
             bs_deltas=bs_deltas,
+            bs_gammas=bs_gammas,
+            bs_thetas=bs_thetas,
+            bs_vegas=bs_vegas,
             time_to_expiry=time_grid,
             implied_volatility=implied_vol,
             strike=strike,
@@ -84,7 +90,7 @@ def main() -> None:
     dataset_bundle = prepare_dataset_bundle(
         csv_path=args.csv_path,
         expiry_time=args.expiry_time,
-        regime=args.regime,
+        regime=args.regime or MODEL_SPECS[args.model_version].default_regime,
         num_paths=args.num_paths,
         volatility=args.volatility,
         rate=args.rate,
@@ -99,8 +105,11 @@ def main() -> None:
 
     train_paths = to_torch(dataset_bundle["train"]["paths"], device=device)
     train_bs_deltas = to_torch(dataset_bundle["train"]["bs_deltas"], device=device)
+    train_bs_gammas = to_torch(dataset_bundle["train"]["bs_gammas"], device=device)
+    train_bs_thetas = to_torch(dataset_bundle["train"]["bs_thetas"], device=device)
+    train_bs_vegas = to_torch(dataset_bundle["train"]["bs_vegas"], device=device)
     train_time_grid = to_torch(dataset_bundle["train"]["time_grid"], device=device)
-    train_implied_vol = torch.full_like(train_time_grid, fill_value=args.volatility)
+    train_implied_vol = to_torch(dataset_bundle["train"]["implied_volatility"], device=device)
 
     generator = torch.Generator(device="cpu")
     generator.manual_seed(args.seed)
@@ -120,6 +129,9 @@ def main() -> None:
                 feature_builder=FEATURE_BUILDERS[args.model_version],
                 price_paths=batch_paths,
                 bs_deltas=batch_bs_deltas,
+                bs_gammas=train_bs_gammas[batch_indices],
+                bs_thetas=train_bs_thetas[batch_indices],
+                bs_vegas=train_bs_vegas[batch_indices],
                 time_to_expiry=batch_time_grid,
                 implied_volatility=batch_implied_vol,
                 strike=dataset_bundle["context"]["strike"],

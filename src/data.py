@@ -148,19 +148,25 @@ def compute_black_scholes_reference(
     volatility: float,
     option_type: str,
     total_horizon_years: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> dict[str, np.ndarray]:
     num_time_points = paths.shape[1]
     if num_time_points <= 1:
         raise ValueError("Paths must contain at least two time points.")
 
     dt = total_horizon_years / (num_time_points - 1)
-    bs_prices = np.zeros_like(paths, dtype=np.float32)
-    bs_deltas = np.zeros_like(paths, dtype=np.float32)
-    time_grid = np.zeros_like(paths, dtype=np.float32)
+    references = {
+        "bs_prices": np.zeros_like(paths, dtype=np.float32),
+        "bs_deltas": np.zeros_like(paths, dtype=np.float32),
+        "bs_gammas": np.zeros_like(paths, dtype=np.float32),
+        "bs_thetas": np.zeros_like(paths, dtype=np.float32),
+        "bs_vegas": np.zeros_like(paths, dtype=np.float32),
+        "time_grid": np.zeros_like(paths, dtype=np.float32),
+        "implied_volatility": np.full_like(paths, fill_value=volatility, dtype=np.float32),
+    }
 
     for step in range(num_time_points):
         remaining_time = max(total_horizon_years - step * dt, 0.0)
-        time_grid[:, step] = remaining_time
+        references["time_grid"][:, step] = remaining_time
         for path_index in range(paths.shape[0]):
             greeks = black_scholes_price_and_greeks(
                 spot=float(paths[path_index, step]),
@@ -170,16 +176,17 @@ def compute_black_scholes_reference(
                 volatility=volatility,
                 option_type=option_type,
             )
-            bs_prices[path_index, step] = greeks["price"]
-            bs_deltas[path_index, step] = greeks["delta"]
-    return bs_prices, bs_deltas, time_grid
+            references["bs_prices"][path_index, step] = greeks["price"]
+            references["bs_deltas"][path_index, step] = greeks["delta"]
+            references["bs_gammas"][path_index, step] = greeks["gamma"]
+            references["bs_thetas"][path_index, step] = greeks["theta"]
+            references["bs_vegas"][path_index, step] = greeks["vega"]
+    return references
 
 
 def split_train_test(
     paths: np.ndarray,
-    bs_prices: np.ndarray,
-    bs_deltas: np.ndarray,
-    time_grid: np.ndarray,
+    references: dict[str, np.ndarray],
     test_ratio: float,
     seed: int,
 ) -> dict:
@@ -192,15 +199,11 @@ def split_train_test(
     return {
         "train": {
             "paths": paths[train_idx],
-            "bs_prices": bs_prices[train_idx],
-            "bs_deltas": bs_deltas[train_idx],
-            "time_grid": time_grid[train_idx],
+            **{name: values[train_idx] for name, values in references.items()},
         },
         "test": {
             "paths": paths[test_idx],
-            "bs_prices": bs_prices[test_idx],
-            "bs_deltas": bs_deltas[test_idx],
-            "time_grid": time_grid[test_idx],
+            **{name: values[test_idx] for name, values in references.items()},
         },
         "test_indices": test_idx.tolist(),
     }
@@ -269,7 +272,7 @@ def prepare_dataset_bundle(
         volatility=volatility,
         seed=seed,
     )
-    bs_prices, bs_deltas, time_grid = compute_black_scholes_reference(
+    references = compute_black_scholes_reference(
         paths=paths,
         strike=context["strike"],
         rate=rate,
@@ -279,9 +282,7 @@ def prepare_dataset_bundle(
     )
     split = split_train_test(
         paths=paths,
-        bs_prices=bs_prices,
-        bs_deltas=bs_deltas,
-        time_grid=time_grid,
+        references=references,
         test_ratio=test_ratio,
         seed=seed,
     )
@@ -311,10 +312,14 @@ def to_torch(array: np.ndarray, device: str) -> torch.Tensor:
 def build_v1_features(
     price_paths: torch.Tensor,
     bs_deltas: torch.Tensor,
+    bs_gammas: torch.Tensor,
+    bs_thetas: torch.Tensor,
+    bs_vegas: torch.Tensor,
     time_to_expiry: torch.Tensor,
     implied_volatility: torch.Tensor,
     strike: float,
     previous_delta: torch.Tensor,
+    running_pnl: torch.Tensor,
     step: int,
 ) -> torch.Tensor:
     spot = price_paths[:, step : step + 1]
@@ -325,10 +330,14 @@ def build_v1_features(
 def build_v2_features(
     price_paths: torch.Tensor,
     bs_deltas: torch.Tensor,
+    bs_gammas: torch.Tensor,
+    bs_thetas: torch.Tensor,
+    bs_vegas: torch.Tensor,
     time_to_expiry: torch.Tensor,
     implied_volatility: torch.Tensor,
     strike: float,
     previous_delta: torch.Tensor,
+    running_pnl: torch.Tensor,
     step: int,
 ) -> torch.Tensor:
     spot = price_paths[:, step : step + 1]
@@ -339,7 +348,60 @@ def build_v2_features(
     return torch.cat([log_moneyness, remaining_time, bs_delta, iv, previous_delta], dim=1)
 
 
+def calculate_realized_volatility(price_paths: torch.Tensor, step: int, window_size: int = 10) -> torch.Tensor:
+    if step == 0:
+        return torch.zeros((price_paths.shape[0], 1), device=price_paths.device, dtype=price_paths.dtype)
+    start = max(0, step - window_size)
+    history = price_paths[:, start : step + 1]
+    log_returns = torch.log(history[:, 1:] / history[:, :-1])
+    if log_returns.shape[1] == 0:
+        return torch.zeros((price_paths.shape[0], 1), device=price_paths.device, dtype=price_paths.dtype)
+    return log_returns.std(dim=1, unbiased=False, keepdim=True)
+
+
+def build_v3_features(
+    price_paths: torch.Tensor,
+    bs_deltas: torch.Tensor,
+    bs_gammas: torch.Tensor,
+    bs_thetas: torch.Tensor,
+    bs_vegas: torch.Tensor,
+    time_to_expiry: torch.Tensor,
+    implied_volatility: torch.Tensor,
+    strike: float,
+    previous_delta: torch.Tensor,
+    running_pnl: torch.Tensor,
+    step: int,
+) -> torch.Tensor:
+    spot = price_paths[:, step : step + 1]
+    log_moneyness = torch.log(spot / strike)
+    remaining_time = time_to_expiry[:, step : step + 1]
+    bs_delta = bs_deltas[:, step : step + 1]
+    bs_gamma = bs_gammas[:, step : step + 1]
+    bs_theta = bs_thetas[:, step : step + 1]
+    bs_vega = bs_vegas[:, step : step + 1]
+    iv = implied_volatility[:, step : step + 1]
+    realized_volatility = calculate_realized_volatility(price_paths, step=step)
+    step_fraction = torch.full_like(remaining_time, fill_value=step / max(price_paths.shape[1] - 1, 1))
+    return torch.cat(
+        [
+            log_moneyness,
+            remaining_time,
+            bs_delta,
+            bs_gamma,
+            bs_theta,
+            bs_vega,
+            iv,
+            realized_volatility,
+            step_fraction,
+            running_pnl,
+            previous_delta,
+        ],
+        dim=1,
+    )
+
+
 FEATURE_BUILDERS = {
     "v1": build_v1_features,
     "v2": build_v2_features,
+    "v3": build_v3_features,
 }

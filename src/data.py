@@ -154,34 +154,67 @@ def compute_black_scholes_reference(
         raise ValueError("Paths must contain at least two time points.")
 
     dt = total_horizon_years / (num_time_points - 1)
-    references = {
-        "bs_prices": np.zeros_like(paths, dtype=np.float32),
-        "bs_deltas": np.zeros_like(paths, dtype=np.float32),
-        "bs_gammas": np.zeros_like(paths, dtype=np.float32),
-        "bs_thetas": np.zeros_like(paths, dtype=np.float32),
-        "bs_vegas": np.zeros_like(paths, dtype=np.float32),
-        "time_grid": np.zeros_like(paths, dtype=np.float32),
+    time_points = np.maximum(total_horizon_years - np.arange(num_time_points, dtype=np.float32) * dt, 0.0)
+    time_grid = np.broadcast_to(time_points, paths.shape).copy()
+
+    # Black-Scholes is the main preprocessing bottleneck, so compute it over the full
+    # path matrix at once instead of looping path-by-path in Python.
+    with torch.no_grad():
+        spot = torch.tensor(paths, dtype=torch.float32)
+        time_to_expiry = torch.tensor(time_grid, dtype=torch.float32)
+        strike_tensor = torch.full_like(spot, fill_value=float(strike))
+        sigma_tensor = torch.full_like(spot, fill_value=float(max(volatility, 1e-8)))
+        rate_tensor = torch.full_like(spot, fill_value=float(rate))
+
+        safe_time = torch.clamp(time_to_expiry, min=1e-12)
+        sqrt_t = torch.sqrt(safe_time)
+        d1 = (torch.log(spot / strike_tensor) + (rate_tensor + 0.5 * sigma_tensor * sigma_tensor) * safe_time) / (
+            sigma_tensor * sqrt_t
+        )
+        d2 = d1 - sigma_tensor * sqrt_t
+
+        normal_cdf_d1 = 0.5 * (1.0 + torch.erf(d1 / math.sqrt(2.0)))
+        normal_cdf_d2 = 0.5 * (1.0 + torch.erf(d2 / math.sqrt(2.0)))
+        normal_cdf_neg_d1 = 0.5 * (1.0 + torch.erf(-d1 / math.sqrt(2.0)))
+        normal_cdf_neg_d2 = 0.5 * (1.0 + torch.erf(-d2 / math.sqrt(2.0)))
+        normal_pdf_d1 = torch.exp(-0.5 * d1 * d1) / math.sqrt(2.0 * math.pi)
+        discount = torch.exp(-rate_tensor * safe_time)
+
+        if option_type == "call":
+            bs_prices = spot * normal_cdf_d1 - strike_tensor * discount * normal_cdf_d2
+            bs_deltas = normal_cdf_d1
+            bs_thetas = -(spot * normal_pdf_d1 * sigma_tensor) / (2.0 * sqrt_t) - rate_tensor * strike_tensor * discount * normal_cdf_d2
+        else:
+            bs_prices = strike_tensor * discount * normal_cdf_neg_d2 - spot * normal_cdf_neg_d1
+            bs_deltas = normal_cdf_d1 - 1.0
+            bs_thetas = -(spot * normal_pdf_d1 * sigma_tensor) / (2.0 * sqrt_t) + rate_tensor * strike_tensor * discount * normal_cdf_neg_d2
+
+        bs_gammas = normal_pdf_d1 / (spot * sigma_tensor * sqrt_t)
+        bs_vegas = spot * normal_pdf_d1 * sqrt_t
+
+        expired_mask = time_to_expiry <= 0.0
+        if option_type == "call":
+            expired_payoff = torch.clamp(spot - strike_tensor, min=0.0)
+            expired_delta = torch.where(spot > strike_tensor, 1.0, 0.0)
+        else:
+            expired_payoff = torch.clamp(strike_tensor - spot, min=0.0)
+            expired_delta = torch.where(spot < strike_tensor, -1.0, 0.0)
+
+        bs_prices = torch.where(expired_mask, expired_payoff, bs_prices)
+        bs_deltas = torch.where(expired_mask, expired_delta, bs_deltas)
+        bs_gammas = torch.where(expired_mask, torch.zeros_like(bs_gammas), bs_gammas)
+        bs_thetas = torch.where(expired_mask, torch.zeros_like(bs_thetas), bs_thetas)
+        bs_vegas = torch.where(expired_mask, torch.zeros_like(bs_vegas), bs_vegas)
+
+    return {
+        "bs_prices": bs_prices.cpu().numpy().astype(np.float32),
+        "bs_deltas": bs_deltas.cpu().numpy().astype(np.float32),
+        "bs_gammas": bs_gammas.cpu().numpy().astype(np.float32),
+        "bs_thetas": bs_thetas.cpu().numpy().astype(np.float32),
+        "bs_vegas": bs_vegas.cpu().numpy().astype(np.float32),
+        "time_grid": time_grid.astype(np.float32),
         "implied_volatility": np.full_like(paths, fill_value=volatility, dtype=np.float32),
     }
-
-    for step in range(num_time_points):
-        remaining_time = max(total_horizon_years - step * dt, 0.0)
-        references["time_grid"][:, step] = remaining_time
-        for path_index in range(paths.shape[0]):
-            greeks = black_scholes_price_and_greeks(
-                spot=float(paths[path_index, step]),
-                strike=strike,
-                time_to_expiry=remaining_time,
-                rate=rate,
-                volatility=volatility,
-                option_type=option_type,
-            )
-            references["bs_prices"][path_index, step] = greeks["price"]
-            references["bs_deltas"][path_index, step] = greeks["delta"]
-            references["bs_gammas"][path_index, step] = greeks["gamma"]
-            references["bs_thetas"][path_index, step] = greeks["theta"]
-            references["bs_vegas"][path_index, step] = greeks["vega"]
-    return references
 
 
 def split_train_test(

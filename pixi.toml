@@ -10,7 +10,6 @@ python = "3.12.*"
 numpy = { version = "*", channel = "conda-forge" }
 scipy = { version = "*", channel = "conda-forge" }
 pandas = { version = "*", channel = "conda-forge" }
-matplotlib = { version = "*", channel = "conda-forge" }
 rich = { version = "*", channel = "conda-forge" }
 pytorch = { version = "*", channel = "pytorch" }
 
@@ -19,7 +18,6 @@ python = "3.12.*"
 numpy = { version = "*", channel = "conda-forge" }
 scipy = { version = "*", channel = "conda-forge" }
 pandas = { version = "*", channel = "conda-forge" }
-matplotlib = { version = "*", channel = "conda-forge" }
 rich = { version = "*", channel = "conda-forge" }
 pytorch = { version = "*", channel = "pytorch" }
 

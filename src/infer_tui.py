@@ -46,7 +46,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--path-index", type=int, default=0)
     parser.add_argument("--delay", type=float, default=0.10)
     parser.add_argument("--history-window", type=int, default=10)
+    parser.add_argument("--plot-window", type=int, default=32)
     parser.add_argument("--spark-width", type=int, default=60)
+    parser.add_argument("--plot-height", type=int, default=7)
     parser.add_argument("--max-steps", type=int, default=0)
     parser.add_argument("--device", default="cpu")
     return parser.parse_args()
@@ -156,12 +158,20 @@ def sample_series(values: list[float], width: int) -> list[float]:
     return sampled
 
 
+def get_window_bounds(step: int, total_steps: int, window_size: int) -> tuple[int, int]:
+    window_size = max(1, window_size)
+    start = (step // window_size) * window_size
+    end = min(total_steps, start + window_size)
+    return start, end
+
+
 def render_plot_lines(
     series_specs: list[tuple[str, list[float], str]],
     width: int,
     height: int,
     y_min: float | None = None,
     y_max: float | None = None,
+    active_points: int | None = None,
 ) -> Text:
     normalized_specs = [(label, sample_series(values, width), style) for label, values, style in series_specs]
     all_values = [value for _, values, _ in normalized_specs for value in values]
@@ -177,20 +187,50 @@ def render_plot_lines(
     grid = [[" " for _ in range(width)] for _ in range(height)]
     styles: list[list[str | None]] = [[None for _ in range(width)] for _ in range(height)]
 
-    zero_row = None
     if lower <= 0.0 <= upper:
         zero_row = int(round((upper - 0.0) / (upper - lower) * (height - 1)))
         zero_row = min(max(zero_row, 0), height - 1)
         for col in range(width):
-            grid[zero_row][col] = "·"
-            styles[zero_row][col] = PLOT_STYLES["neutral"]
+            grid[zero_row][col] = "─"
+            styles[zero_row][col] = "grey27"
+
+    max_active = width if active_points is None else min(max(active_points, 0), width)
+
+    def value_to_row(value: float) -> int:
+        row = int(round((upper - value) / (upper - lower) * (height - 1)))
+        return min(max(row, 0), height - 1)
+
+    def draw_cell(row: int, col: int, char: str, style: str) -> None:
+        existing = grid[row][col]
+        if existing == " " or existing == "─":
+            grid[row][col] = char
+            styles[row][col] = style
+        elif existing != char:
+            grid[row][col] = "◆"
+            styles[row][col] = style
 
     for _, values, style in normalized_specs:
-        for col, value in enumerate(values):
-            row = int(round((upper - value) / (upper - lower) * (height - 1)))
-            row = min(max(row, 0), height - 1)
-            grid[row][col] = "●"
-            styles[row][col] = style
+        active_values = values[:max_active]
+        if not active_values:
+            continue
+        points = [(col, value_to_row(value)) for col, value in enumerate(active_values)]
+        for index, (col, row) in enumerate(points):
+            if index > 0:
+                prev_col, prev_row = points[index - 1]
+                left_col, right_col = sorted((prev_col, col))
+                if prev_row == row:
+                    for fill_col in range(left_col, right_col + 1):
+                        draw_cell(row, fill_col, "─", style)
+                else:
+                    span = max(1, right_col - left_col)
+                    for offset, fill_col in enumerate(range(left_col, right_col + 1)):
+                        ratio = offset / span
+                        interp_row = int(round(prev_row + (row - prev_row) * ratio))
+                        if row < prev_row:
+                            draw_cell(interp_row, fill_col, "╱", style)
+                        else:
+                            draw_cell(interp_row, fill_col, "╲", style)
+            draw_cell(row, col, "●", style)
 
     text = Text()
     for row in range(height):
@@ -367,6 +407,7 @@ def format_float(value: float) -> str:
 
 
 def build_header(state: dict, step: int, done: bool) -> Panel:
+    page_start, page_end = get_window_bounds(step, len(state["prices"]), state["config"]["plot_window"])
     title = Text("Deep Hedger Inference TUI", style="bold cyan")
     subtitle = Text(
         f"{state['metadata']['model_name']} | regime={state['config']['regime']} | "
@@ -375,7 +416,7 @@ def build_header(state: dict, step: int, done: bool) -> Panel:
         style="white",
     )
     status = Text(
-        f"step {step + 1}/{len(state['prices'])} | {'complete' if done else 'streaming'}",
+        f"step {step + 1}/{len(state['prices'])} | page {page_start}-{page_end - 1} | {'complete' if done else 'streaming'}",
         style="bold green" if done else "bold yellow",
     )
     return Panel(Group(Align.center(title), Align.center(subtitle), Align.center(status)), box=box.ROUNDED)
@@ -412,6 +453,7 @@ def build_context_table(state: dict) -> Table:
     table.add_row("Checkpoint best epoch", str(state["metadata"].get("best_epoch", "n/a")))
     table.add_row("Selection metric", str(state["metadata"].get("selection_metric", "n/a")))
     table.add_row("Device", str(state["config"].get("device", "cpu")))
+    table.add_row("Plot window", str(state["config"]["plot_window"]))
     return table
 
 
@@ -439,17 +481,55 @@ def build_scorecard_table(state: dict, step: int) -> Table:
     return table
 
 
-def build_plot_panel(state: dict, step: int, spark_width: int) -> Panel:
-    price_history = state["prices"][: step + 1]
-    bs_history = state["bs_deltas"][: step + 1]
-    deep_history = state["deep_deltas"][: step + 1]
-    pnl_bs = state["bs_total_pnl"][: step + 1]
-    pnl_model = state["deep_total_pnl"][: step + 1]
+def build_plot_legend(items: list[tuple[str, str, float]]) -> Text:
+    legend = Text()
+    for index, (label, style, value) in enumerate(items):
+        if index > 0:
+            legend.append("   ")
+        legend.append("■ ", style=style)
+        legend.append(f"{label} {format_signed(value)}", style=style)
+    return legend
+
+
+def build_plot_panel(state: dict, step: int, spark_width: int, plot_height: int, plot_window: int) -> Panel:
+    page_start, page_end = get_window_bounds(step, len(state["prices"]), plot_window)
+    active_points = step - page_start + 1
+    price_history = state["prices"][page_start:page_end]
+    bs_history = state["bs_deltas"][page_start:page_end]
+    deep_history = state["deep_deltas"][page_start:page_end]
+    pnl_bs = state["bs_total_pnl"][page_start:page_end]
+    pnl_model = state["deep_total_pnl"][page_start:page_end]
+    local_index = active_points - 1
     text = Text()
-    text.append("Market path\n", style="bold white")
-    text.append_text(render_plot_lines([("price", price_history, PLOT_STYLES["price"])], spark_width, 5))
+    text.append(f"Window {page_start}..{page_end - 1}\n", style="bold white")
+    text.append_text(
+        build_plot_legend(
+            [("Spot", PLOT_STYLES["price"], price_history[local_index])]
+        )
+    )
+    text.append(
+        f"   range [{min(price_history):.4f}, {max(price_history):.4f}]",
+        style="grey70",
+    )
+    text.append("\n")
+    text.append_text(
+        render_plot_lines(
+            [("price", price_history, PLOT_STYLES["price"])],
+            spark_width,
+            plot_height,
+            active_points=active_points,
+        )
+    )
     text.append("\n\n")
-    text.append("Hedge curves\n", style="bold white")
+    text.append_text(
+        build_plot_legend(
+            [
+                ("BS hedge", PLOT_STYLES["bs"], bs_history[local_index]),
+                ("Model hedge", PLOT_STYLES["model"], deep_history[local_index]),
+            ]
+        )
+    )
+    text.append("   y-range [-1.0, 1.0]\n", style="grey70")
     text.append_text(
         render_plot_lines(
             [
@@ -457,13 +537,25 @@ def build_plot_panel(state: dict, step: int, spark_width: int) -> Panel:
                 ("model", deep_history, PLOT_STYLES["model"]),
             ],
             spark_width,
-            5,
+            plot_height,
             y_min=-1.1,
             y_max=1.1,
+            active_points=active_points,
         )
     )
     text.append("\n\n")
-    text.append("Cumulative PnL\n", style="bold white")
+    text.append_text(
+        build_plot_legend(
+            [
+                ("BS PnL", PLOT_STYLES["bs"], pnl_bs[local_index]),
+                ("Model PnL", PLOT_STYLES["model"], pnl_model[local_index]),
+            ]
+        )
+    )
+    text.append(
+        f"   range [{min(min(pnl_bs), min(pnl_model)):.4f}, {max(max(pnl_bs), max(pnl_model)):.4f}]\n",
+        style="grey70",
+    )
     text.append_text(
         render_plot_lines(
             [
@@ -471,7 +563,8 @@ def build_plot_panel(state: dict, step: int, spark_width: int) -> Panel:
                 ("model", pnl_model, PLOT_STYLES["model"]),
             ],
             spark_width,
-            5,
+            plot_height,
+            active_points=active_points,
         )
     )
     return Panel(text, title="Visual Dashboard", box=box.ROUNDED, border_style="cyan")
@@ -517,8 +610,8 @@ def build_recent_steps_table(state: dict, step: int, history_window: int) -> Tab
     table.add_column("BS PnL", justify="right")
     table.add_column("Model PnL", justify="right")
 
-    start = max(0, step - history_window + 1)
-    for row_step in range(start, step + 1):
+    start, end = get_window_bounds(step, len(state["prices"]), history_window)
+    for row_step in range(start, min(step + 1, end)):
         table.add_row(
             str(row_step),
             format_float(state["prices"][row_step]),
@@ -557,7 +650,7 @@ def render_dashboard(state: dict, step: int, history_window: int, spark_width: i
         Layout(name="footer", size=3),
     )
     layout["body"].split_row(Layout(name="left", ratio=3), Layout(name="right", ratio=2))
-    layout["left"].split_column(Layout(name="plots", size=22), Layout(name="recent", ratio=1))
+    layout["left"].split_column(Layout(name="plots", size=28), Layout(name="recent", ratio=1))
     layout["right"].split_column(
         Layout(name="summary", size=13),
         Layout(name="gauges", size=14),
@@ -567,7 +660,15 @@ def render_dashboard(state: dict, step: int, history_window: int, spark_width: i
 
     done = step >= len(state["prices"]) - 1
     layout["header"].update(build_header(state, step, done))
-    layout["plots"].update(build_plot_panel(state, step, spark_width))
+    layout["plots"].update(
+        build_plot_panel(
+            state,
+            step,
+            spark_width,
+            state["config"]["plot_height"],
+            state["config"]["plot_window"],
+        )
+    )
     layout["recent"].update(Panel(build_recent_steps_table(state, step, history_window), title="Recent Steps", box=box.ROUNDED))
     layout["summary"].update(Panel(build_summary_table(state, step), title="Step Summary", box=box.ROUNDED))
     layout["gauges"].update(build_gauge_panel(state, step))
@@ -583,6 +684,8 @@ def main() -> None:
     model, metadata = load_checkpoint(checkpoint_path, device=args.device)
     bundle, resolved_config = build_dataset(args, metadata)
     resolved_config["device"] = args.device
+    resolved_config["plot_window"] = args.plot_window
+    resolved_config["plot_height"] = args.plot_height
     state = build_inference_state(
         model=model,
         metadata=metadata,

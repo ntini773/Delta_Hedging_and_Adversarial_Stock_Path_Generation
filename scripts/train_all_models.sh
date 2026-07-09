@@ -15,6 +15,9 @@ LEARNING_RATE="${LEARNING_RATE:-0.0003}"
 SEED="${SEED:-42}"
 VALIDATION_RATIO="${VALIDATION_RATIO:-0.1}"
 TEST_RATIO="${TEST_RATIO:-0.2}"
+JUMP_INTENSITY="${JUMP_INTENSITY:-120}"
+JUMP_MEAN="${JUMP_MEAN:--0.03}"
+JUMP_STD="${JUMP_STD:-0.12}"
 RUN_TAG="${RUN_TAG:-$(date -u +%Y%m%dT%H%M%SZ)}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
@@ -45,6 +48,9 @@ CUDA_VISIBLE_DEVICES=0 python -m src.train \
   --seed "$SEED" \
   --test-ratio "$TEST_RATIO" \
   --validation-ratio "$VALIDATION_RATIO" \
+  --jump-intensity "$JUMP_INTENSITY" \
+  --jump-mean "$JUMP_MEAN" \
+  --jump-std "$JUMP_STD" \
   --run-tag "$RUN_TAG" \
   --device cuda \
   --output-dir "$CHECKPOINT_DIR" \
@@ -64,6 +70,9 @@ CUDA_VISIBLE_DEVICES=1 python -m src.train \
   --seed "$SEED" \
   --test-ratio "$TEST_RATIO" \
   --validation-ratio "$VALIDATION_RATIO" \
+  --jump-intensity "$JUMP_INTENSITY" \
+  --jump-mean "$JUMP_MEAN" \
+  --jump-std "$JUMP_STD" \
   --run-tag "$RUN_TAG" \
   --device cuda \
   --output-dir "$CHECKPOINT_DIR" \
@@ -84,6 +93,9 @@ PID_V2=$!
     --seed "$SEED" \
     --test-ratio "$TEST_RATIO" \
     --validation-ratio "$VALIDATION_RATIO" \
+    --jump-intensity "$JUMP_INTENSITY" \
+    --jump-mean "$JUMP_MEAN" \
+    --jump-std "$JUMP_STD" \
     --run-tag "$RUN_TAG" \
     --device cuda \
     --output-dir "$CHECKPOINT_DIR" \
@@ -102,6 +114,9 @@ PID_V2=$!
     --seed "$SEED" \
     --test-ratio "$TEST_RATIO" \
     --validation-ratio "$VALIDATION_RATIO" \
+    --jump-intensity "$JUMP_INTENSITY" \
+    --jump-mean "$JUMP_MEAN" \
+    --jump-std "$JUMP_STD" \
     --run-tag "$RUN_TAG" \
     --device cuda \
     --output-dir "$CHECKPOINT_DIR" \

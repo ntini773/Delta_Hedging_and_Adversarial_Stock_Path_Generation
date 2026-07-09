@@ -11,6 +11,8 @@ Minimal PyTorch implementation of the workflow from `HFT_CAMP_CODE.ipynb`, split
 - `src/train.py`: train a selected model version and save checkpoint + metadata
 - `src/benchmark.py`: load saved checkpoints only and write `BENCHMARK.md`
 - `src/infer_tui.py`: Rich terminal dashboard for single-path inference on the benchmark test split
+- `docs/gbm_vs_jump.svg`: visual explainer for smooth GBM paths vs jump-diffusion stress paths
+- `docs/benchmark_metrics_guide.svg`: visual explainer for benchmark metrics and fair comparisons
 
 ## Model Versions
 
@@ -103,6 +105,7 @@ bash scripts/run_inference_tui.sh
 
 Both scripts accept overrides through environment variables such as `NUM_PATHS`, `EPOCHS`, `BATCH_SIZE`, `CHECKPOINT_DIR`, and `BENCHMARK_DIR`.
 For Weights & Biases logging, set `WANDB_PROJECT`, optionally `WANDB_ENTITY`, and `WANDB_MODE=online` before running training.
+Jump stress can be configured with `JUMP_INTENSITY`, `JUMP_MEAN`, and `JUMP_STD`. Current stronger defaults are `120`, `-0.03`, and `0.12`.
 
 Default `NUM_PATHS` in both bash scripts is `10000`.
 The training script writes a shared `RUN_TAG`, and the benchmark script reuses it so only checkpoints from the same coordinated run are compared by default.
@@ -111,6 +114,7 @@ The training script writes a shared `RUN_TAG`, and the benchmark script reuses i
 
 - Default data file: `data/20260205_option_minute_prices_expiry.csv`
 - Default split: `70% train / 10% validation / 20% test`
+- Visual guides: `docs/gbm_vs_jump.svg` and `docs/benchmark_metrics_guide.svg`
 - The benchmark never retrains models. Missing checkpoints are reported explicitly.
 - Benchmarking uses the canonical `deep_hedger_v*.pt` checkpoints, which are the best-validation checkpoints.
 - Transaction costs are part of P&L and the loss definition, not the raw CSV data.

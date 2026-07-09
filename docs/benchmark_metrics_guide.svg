@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820">
+  <rect width="1200" height="820" fill="#f5f7fb"/>
+  <text x="60" y="70" font-family="Georgia, serif" font-size="34" fill="#17202a">Benchmark Metrics Guide</text>
+  <text x="60" y="102" font-family="Verdana, sans-serif" font-size="18" fill="#52606d">How to read the report and what counts as a better hedge</text>
+
+  <rect x="60" y="145" width="1080" height="110" rx="24" fill="#ffffff" stroke="#d6dde8"/>
+  <text x="90" y="185" font-family="Verdana, sans-serif" font-size="22" font-weight="700" fill="#17324d">Fair comparison rule</text>
+  <text x="90" y="220" font-family="Verdana, sans-serif" font-size="17" fill="#52606d">Models with transaction costs must be compared to Black-Scholes with the same transaction costs.</text>
+  <text x="90" y="246" font-family="Verdana, sans-serif" font-size="17" fill="#52606d">The report now matches each model to the proper baseline automatically.</text>
+
+  <rect x="60" y="290" width="520" height="450" rx="24" fill="#fffdfa" stroke="#ded4c6"/>
+  <rect x="620" y="290" width="520" height="450" rx="24" fill="#fcfeff" stroke="#d2dfea"/>
+
+  <text x="90" y="335" font-family="Verdana, sans-serif" font-size="24" font-weight="700" fill="#6b4f2c">Primary hedge-quality metrics</text>
+  <text x="650" y="335" font-family="Verdana, sans-serif" font-size="24" font-weight="700" fill="#1d4e89">Secondary interpretation metrics</text>
+
+  <text x="90" y="380" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">Tail Loss 5%</text>
+  <text x="90" y="406" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Average of the worst 5% outcomes.</text>
+  <text x="90" y="430" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Lower is better. This is the most important tail-risk number.</text>
+
+  <text x="90" y="480" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">Downside Deviation</text>
+  <text x="90" y="506" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Magnitude of negative outcomes only.</text>
+  <text x="90" y="530" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Lower is better. Useful when average P&amp;L can be misleading.</text>
+
+  <text x="90" y="580" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">Std Dev</text>
+  <text x="90" y="606" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Overall spread of outcomes.</text>
+  <text x="90" y="630" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Lower is usually better, but tail metrics matter more.</text>
+
+  <text x="90" y="680" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">VaR 5%</text>
+  <text x="90" y="706" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">The 5th-percentile outcome.</text>
+  <text x="90" y="730" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Higher is better because less negative is a smaller loss.</text>
+
+  <text x="650" y="380" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">Mean P&amp;L</text>
+  <text x="650" y="406" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Average hedged outcome under the repo's definition.</text>
+  <text x="650" y="430" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Higher is better, but not enough by itself.</text>
+
+  <text x="650" y="480" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">Total Tx Cost</text>
+  <text x="650" y="506" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Total trading friction paid by the hedge.</text>
+  <text x="650" y="530" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">Lower is better unless it clearly buys better tail control.</text>
+
+  <text x="650" y="580" font-family="Verdana, sans-serif" font-size="19" font-weight="700" fill="#17202a">What counts as "better than BS"</text>
+  <text x="650" y="606" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">1. Lower Tail Loss 5%</text>
+  <text x="650" y="632" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">2. Lower Downside Deviation</text>
+  <text x="650" y="658" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">3. Comparable or better Mean P&amp;L</text>
+  <text x="650" y="684" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">4. Transaction costs not exploding to achieve the above</text>
+
+  <rect x="650" y="705" width="430" height="1" fill="#d2dfea"/>
+  <text x="650" y="735" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">A hedge can have positive pathwise P&amp;L, but hedging is judged mainly by</text>
+  <text x="650" y="758" font-family="Verdana, sans-serif" font-size="16" fill="#52606d">distribution improvement, especially in the left tail.</text>
+</svg>

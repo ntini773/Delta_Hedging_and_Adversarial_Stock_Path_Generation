@@ -26,6 +26,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-ratio", type=float, default=0.2)
     parser.add_argument("--validation-ratio", type=float, default=0.1)
+    parser.add_argument("--jump-intensity", type=float, default=120.0)
+    parser.add_argument("--jump-mean", type=float, default=-0.03)
+    parser.add_argument("--jump-std", type=float, default=0.12)
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
@@ -132,6 +135,9 @@ def main() -> None:
         seed=args.seed,
         test_ratio=args.test_ratio,
         validation_ratio=args.validation_ratio,
+        jump_intensity=args.jump_intensity,
+        jump_mean=args.jump_mean,
+        jump_std=args.jump_std,
     )
     spec = MODEL_SPECS[args.model_version]
     device = args.device

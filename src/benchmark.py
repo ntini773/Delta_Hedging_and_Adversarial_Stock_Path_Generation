@@ -25,6 +25,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-ratio", type=float, default=0.2)
     parser.add_argument("--validation-ratio", type=float, default=0.1)
+    parser.add_argument("--jump-intensity", type=float, default=120.0)
+    parser.add_argument("--jump-mean", type=float, default=-0.03)
+    parser.add_argument("--jump-std", type=float, default=0.12)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--run-tag", default="")
     return parser.parse_args()
@@ -46,6 +49,14 @@ def is_checkpoint_compatible(metadata: dict, args: argparse.Namespace) -> tuple[
         "test_ratio": args.test_ratio,
         "validation_ratio": args.validation_ratio,
     }
+    if dataset_config.get("regime") == "jump_diffusion":
+        required_pairs.update(
+            {
+                "jump_intensity": args.jump_intensity,
+                "jump_mean": args.jump_mean,
+                "jump_std": args.jump_std,
+            }
+        )
     for key, expected_value in required_pairs.items():
         if dataset_config.get(key) != expected_value:
             return False, f"{key} mismatch (checkpoint={dataset_config.get(key)!r}, expected={expected_value!r})"
@@ -219,8 +230,8 @@ def main() -> None:
         f"- Dataset split: `train {int((1.0 - args.test_ratio - args.validation_ratio) * 100)}% / validation {int(args.validation_ratio * 100)}% / test {int(args.test_ratio * 100)}%`",
         f"- Test set size: `{int(args.num_paths * args.test_ratio)}` paths",
         f"- Random seed: `{args.seed}`",
-        f"- Jump-diffusion intensity: `{25.0}` jumps/year when regime=`jump_diffusion`",
-        f"- Jump mean / std in log space: `-0.02 / 0.08`",
+        f"- Jump-diffusion intensity: `{args.jump_intensity}` jumps/year when regime=`jump_diffusion`",
+        f"- Jump mean / std in log space: `{args.jump_mean} / {args.jump_std}`",
         "",
     ]
 
@@ -243,6 +254,9 @@ def main() -> None:
             seed=args.seed,
             test_ratio=args.test_ratio,
             validation_ratio=args.validation_ratio,
+            jump_intensity=args.jump_intensity,
+            jump_mean=args.jump_mean,
+            jump_std=args.jump_std,
         )
 
         summary_rows: list[tuple[str, dict[str, float]]] = []

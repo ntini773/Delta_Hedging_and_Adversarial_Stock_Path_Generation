@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <rect width="1200" height="760" fill="#f7f3ea"/>
+  <text x="60" y="70" font-family="Georgia, serif" font-size="34" fill="#17202a">GBM Vs Jump-Diffusion</text>
+  <text x="60" y="102" font-family="Verdana, sans-serif" font-size="18" fill="#4d5b67">Why jump scenarios are a harder and fairer hedging test</text>
+
+  <rect x="60" y="140" width="500" height="520" rx="24" fill="#fffaf1" stroke="#d6c7a8" stroke-width="2"/>
+  <rect x="640" y="140" width="500" height="520" rx="24" fill="#f9fbff" stroke="#b7c7dd" stroke-width="2"/>
+
+  <text x="90" y="185" font-family="Verdana, sans-serif" font-size="28" font-weight="700" fill="#8a5b00">GBM</text>
+  <text x="670" y="185" font-family="Verdana, sans-serif" font-size="28" font-weight="700" fill="#0d4f8b">Jump-Diffusion</text>
+
+  <text x="90" y="220" font-family="Verdana, sans-serif" font-size="16" fill="#5f5a4f">Continuous diffusion only. Smooth lognormal path.</text>
+  <text x="670" y="220" font-family="Verdana, sans-serif" font-size="16" fill="#516579">Diffusion plus random gap events. Discontinuous path.</text>
+
+  <line x1="100" y1="520" x2="520" y2="520" stroke="#8c8c8c" stroke-width="1.5"/>
+  <line x1="100" y1="280" x2="100" y2="520" stroke="#8c8c8c" stroke-width="1.5"/>
+  <line x1="680" y1="520" x2="1100" y2="520" stroke="#8c8c8c" stroke-width="1.5"/>
+  <line x1="680" y1="280" x2="680" y2="520" stroke="#8c8c8c" stroke-width="1.5"/>
+
+  <polyline fill="none" stroke="#dd8a00" stroke-width="5" points="100,480 130,470 160,455 190,460 220,438 250,430 280,412 310,395 340,404 370,382 400,366 430,350 460,342 490,328 520,315"/>
+  <polyline fill="none" stroke="#1572c4" stroke-width="5" points="680,480 710,470 740,455 770,460 800,438 830,430 860,412 890,300 920,320 950,372 980,360 1010,250 1040,274 1070,264 1100,238"/>
+
+  <circle cx="890" cy="300" r="7" fill="#c13232"/>
+  <circle cx="1010" cy="250" r="7" fill="#c13232"/>
+  <text x="905" y="294" font-family="Verdana, sans-serif" font-size="15" fill="#9b2226">jump</text>
+  <text x="1025" y="244" font-family="Verdana, sans-serif" font-size="15" fill="#9b2226">jump</text>
+
+  <text x="90" y="560" font-family="Verdana, sans-serif" font-size="18" font-weight="700" fill="#6f4f1b">Implication for hedging</text>
+  <text x="90" y="590" font-family="Verdana, sans-serif" font-size="16" fill="#4d5b67">Black-Scholes delta assumptions fit better here:</text>
+  <text x="90" y="615" font-family="Verdana, sans-serif" font-size="16" fill="#4d5b67">small continuous moves, no sudden rebalance gap.</text>
+
+  <text x="670" y="560" font-family="Verdana, sans-serif" font-size="18" font-weight="700" fill="#184e77">Implication for hedging</text>
+  <text x="670" y="590" font-family="Verdana, sans-serif" font-size="16" fill="#516579">A delta hedge cannot rebalance before the gap.</text>
+  <text x="670" y="615" font-family="Verdana, sans-serif" font-size="16" fill="#516579">Tail risk and hedge slippage become much more visible.</text>
+
+  <rect x="90" y="640" width="440" height="1" fill="#d6c7a8"/>
+  <rect x="670" y="640" width="440" height="1" fill="#b7c7dd"/>
+
+  <text x="90" y="680" font-family="Verdana, sans-serif" font-size="17" font-weight="700" fill="#17202a">Current stronger jump defaults</text>
+  <text x="90" y="708" font-family="Verdana, sans-serif" font-size="16" fill="#4d5b67">intensity = 120/year, mean = -0.03, std = 0.12</text>
+  <text x="90" y="732" font-family="Verdana, sans-serif" font-size="16" fill="#4d5b67">Over a 4.5-hour path, expected jumps ≈ intensity × horizon.</text>
+</svg>

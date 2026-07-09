@@ -10,9 +10,9 @@ import torch
 from src.black_scholes import black_scholes_price_and_greeks, solve_implied_volatility
 
 JUMP_DIFFUSION_PARAMS = {
-    "jump_intensity": 25.0,
-    "jump_mean": -0.02,
-    "jump_std": 0.08,
+    "jump_intensity": 120.0,
+    "jump_mean": -0.03,
+    "jump_std": 0.12,
 }
 
 
@@ -277,6 +277,9 @@ def generate_regime_dataset(
     rate: float,
     volatility: float,
     seed: int,
+    jump_intensity: float,
+    jump_mean: float,
+    jump_std: float,
 ) -> np.ndarray:
     dt = total_horizon_years / num_steps
     if regime == "gbm":
@@ -297,9 +300,9 @@ def generate_regime_dataset(
             num_paths=num_paths,
             drift=rate,
             volatility=volatility,
-            jump_intensity=JUMP_DIFFUSION_PARAMS["jump_intensity"],
-            jump_mean=JUMP_DIFFUSION_PARAMS["jump_mean"],
-            jump_std=JUMP_DIFFUSION_PARAMS["jump_std"],
+            jump_intensity=jump_intensity,
+            jump_mean=jump_mean,
+            jump_std=jump_std,
             seed=seed,
         )
     raise ValueError(f"Unsupported regime: {regime}")
@@ -315,6 +318,9 @@ def prepare_dataset_bundle(
     seed: int,
     test_ratio: float,
     validation_ratio: float,
+    jump_intensity: float = JUMP_DIFFUSION_PARAMS["jump_intensity"],
+    jump_mean: float = JUMP_DIFFUSION_PARAMS["jump_mean"],
+    jump_std: float = JUMP_DIFFUSION_PARAMS["jump_std"],
     target_option_symbol: str | None = None,
 ) -> dict:
     context = build_real_market_context(
@@ -331,6 +337,9 @@ def prepare_dataset_bundle(
         rate=rate,
         volatility=volatility,
         seed=seed,
+        jump_intensity=jump_intensity,
+        jump_mean=jump_mean,
+        jump_std=jump_std,
     )
     references = compute_black_scholes_reference(
         paths=paths,
@@ -360,7 +369,13 @@ def prepare_dataset_bundle(
         "target_option_symbol": context["target_option_symbol"],
     }
     if regime == "jump_diffusion":
-        config.update(JUMP_DIFFUSION_PARAMS)
+        config.update(
+            {
+                "jump_intensity": jump_intensity,
+                "jump_mean": jump_mean,
+                "jump_std": jump_std,
+            }
+        )
 
     return {
         "context": context,

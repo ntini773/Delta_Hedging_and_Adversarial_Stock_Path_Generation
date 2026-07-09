@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import time
 from pathlib import Path
 
@@ -18,6 +19,14 @@ from src.data import FEATURE_BUILDERS, prepare_dataset_bundle, to_torch
 from src.model import MODEL_SPECS, build_model, run_deep_hedger
 
 SPARK_CHARS = " .:-=+*#%@"
+PLOT_STYLES = {
+    "price": "bold cyan",
+    "bs": "bold yellow",
+    "model": "bold magenta",
+    "pnl_pos": "bold green",
+    "pnl_neg": "bold red",
+    "neutral": "grey62",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -122,6 +131,114 @@ def ascii_sparkline(values: list[float], width: int) -> str:
     return "".join(chars)
 
 
+def format_signed(value: float) -> str:
+    return f"{value:+.4f}"
+
+
+def style_for_value(value: float, positive: str = "green", negative: str = "red", zero: str = "white") -> str:
+    if value > 0:
+        return positive
+    if value < 0:
+        return negative
+    return zero
+
+
+def sample_series(values: list[float], width: int) -> list[float]:
+    if not values:
+        return []
+    if len(values) <= width:
+        return values[:]
+    sampled = []
+    last_index = len(values) - 1
+    for i in range(width):
+        idx = round(i * last_index / max(1, width - 1))
+        sampled.append(values[idx])
+    return sampled
+
+
+def render_plot_lines(
+    series_specs: list[tuple[str, list[float], str]],
+    width: int,
+    height: int,
+    y_min: float | None = None,
+    y_max: float | None = None,
+) -> Text:
+    normalized_specs = [(label, sample_series(values, width), style) for label, values, style in series_specs]
+    all_values = [value for _, values, _ in normalized_specs for value in values]
+    if not all_values:
+        return Text("No data", style=PLOT_STYLES["neutral"])
+
+    lower = min(all_values) if y_min is None else y_min
+    upper = max(all_values) if y_max is None else y_max
+    if math.isclose(lower, upper, rel_tol=0.0, abs_tol=1e-12):
+        lower -= 1.0
+        upper += 1.0
+
+    grid = [[" " for _ in range(width)] for _ in range(height)]
+    styles: list[list[str | None]] = [[None for _ in range(width)] for _ in range(height)]
+
+    zero_row = None
+    if lower <= 0.0 <= upper:
+        zero_row = int(round((upper - 0.0) / (upper - lower) * (height - 1)))
+        zero_row = min(max(zero_row, 0), height - 1)
+        for col in range(width):
+            grid[zero_row][col] = "·"
+            styles[zero_row][col] = PLOT_STYLES["neutral"]
+
+    for _, values, style in normalized_specs:
+        for col, value in enumerate(values):
+            row = int(round((upper - value) / (upper - lower) * (height - 1)))
+            row = min(max(row, 0), height - 1)
+            grid[row][col] = "●"
+            styles[row][col] = style
+
+    text = Text()
+    for row in range(height):
+        if row > 0:
+            text.append("\n")
+        for col in range(width):
+            cell_style = styles[row][col] or ""
+            text.append(grid[row][col], style=cell_style)
+    return text
+
+
+def metric_bar(value: float, low: float, high: float, width: int, style: str) -> Text:
+    width = max(width, 8)
+    span = high - low
+    if math.isclose(span, 0.0, abs_tol=1e-12):
+        filled = width // 2
+    else:
+        clipped = min(max(value, low), high)
+        filled = int(round((clipped - low) / span * width))
+    filled = min(max(filled, 0), width)
+    text = Text()
+    text.append("[" , style="grey50")
+    text.append("█" * filled, style=style)
+    text.append("░" * (width - filled), style="grey27")
+    text.append("]", style="grey50")
+    return text
+
+
+def compute_drawdown(values: list[float]) -> list[float]:
+    running_peak = float("-inf")
+    drawdowns = []
+    for value in values:
+        running_peak = max(running_peak, value)
+        drawdowns.append(value - running_peak)
+    return drawdowns
+
+
+def compute_turnover(hedge_path: list[float]) -> list[float]:
+    turnover = []
+    cumulative = 0.0
+    previous = 0.0
+    for delta in hedge_path:
+        cumulative += abs(delta - previous)
+        turnover.append(cumulative)
+        previous = delta
+    return turnover
+
+
 def compute_running_path_metrics(
     prices: list[float],
     hedge_path: list[float],
@@ -208,6 +325,15 @@ def build_inference_state(
         option_type=bundle["context"]["option_type"],
         transaction_cost_rate=metadata["transaction_cost_rate"],
     )
+    bs_turnover = compute_turnover(bs_deltas)
+    deep_turnover = compute_turnover(deep_hedge)
+    bs_drawdown = compute_drawdown(bs_total)
+    deep_drawdown = compute_drawdown(deep_total)
+    price_returns = [0.0]
+    for idx in range(1, len(prices)):
+        previous = prices[idx - 1]
+        price_returns.append(0.0 if abs(previous) < 1e-12 else (prices[idx] - previous) / previous)
+    delta_gap = [model_delta - bs_delta for model_delta, bs_delta in zip(deep_hedge, bs_deltas)]
 
     return {
         "metadata": metadata,
@@ -219,14 +345,20 @@ def build_inference_state(
         "prices": prices,
         "time_to_expiry": single["time_grid"][0].tolist(),
         "implied_volatility": single["implied_volatility"][0].tolist(),
+        "price_returns": price_returns,
         "bs_deltas": bs_deltas,
         "deep_deltas": deep_hedge,
+        "delta_gap": delta_gap,
         "bs_trading_pnl": bs_trading,
         "bs_costs": bs_costs,
         "bs_total_pnl": bs_total,
+        "bs_turnover": bs_turnover,
+        "bs_drawdown": bs_drawdown,
         "deep_trading_pnl": deep_trading,
         "deep_costs": deep_costs,
         "deep_total_pnl": deep_total,
+        "deep_turnover": deep_turnover,
+        "deep_drawdown": deep_drawdown,
     }
 
 
@@ -254,14 +386,18 @@ def build_summary_table(state: dict, step: int) -> Table:
     table.add_column("Field", style="cyan")
     table.add_column("Value", style="white")
     table.add_row("Spot", format_float(state["prices"][step]))
+    table.add_row("Return", Text(format_signed(state["price_returns"][step]), style=style_for_value(state["price_returns"][step])))
     table.add_row("BS delta", format_float(state["bs_deltas"][step]))
     table.add_row("Model delta", format_float(state["deep_deltas"][step]))
-    table.add_row("Delta gap", format_float(state["deep_deltas"][step] - state["bs_deltas"][step]))
+    table.add_row(
+        "Delta gap",
+        Text(format_signed(state["delta_gap"][step]), style=style_for_value(state["delta_gap"][step], positive="magenta", negative="yellow")),
+    )
     table.add_row("Time to expiry", format_float(state["time_to_expiry"][step]))
     table.add_row("Implied vol", format_float(state["implied_volatility"][step]))
-    table.add_row("BS total PnL", format_float(state["bs_total_pnl"][step]))
-    table.add_row("Model total PnL", format_float(state["deep_total_pnl"][step]))
-    table.add_row("Model tx cost", format_float(state["deep_costs"][step]))
+    table.add_row("BS total PnL", Text(format_signed(state["bs_total_pnl"][step]), style=style_for_value(state["bs_total_pnl"][step])))
+    table.add_row("Model total PnL", Text(format_signed(state["deep_total_pnl"][step]), style=style_for_value(state["deep_total_pnl"][step])))
+    table.add_row("Model tx cost", Text(format_signed(-state["deep_costs"][step]), style="red"))
     return table
 
 
@@ -279,24 +415,105 @@ def build_context_table(state: dict) -> Table:
     return table
 
 
-def build_trajectory_panel(state: dict, step: int, spark_width: int) -> Panel:
+def build_scorecard_table(state: dict, step: int) -> Table:
+    table = Table(box=box.SIMPLE_HEAVY)
+    table.add_column("Metric", style="cyan")
+    table.add_column("BS", justify="right")
+    table.add_column("Model", justify="right")
+    table.add_column("Gap", justify="right")
+    metrics = [
+        ("Trading PnL", state["bs_trading_pnl"][step], state["deep_trading_pnl"][step]),
+        ("Total PnL", state["bs_total_pnl"][step], state["deep_total_pnl"][step]),
+        ("Tx Cost", state["bs_costs"][step], state["deep_costs"][step]),
+        ("Turnover", state["bs_turnover"][step], state["deep_turnover"][step]),
+        ("Drawdown", state["bs_drawdown"][step], state["deep_drawdown"][step]),
+    ]
+    for name, bs_value, model_value in metrics:
+        gap = model_value - bs_value
+        table.add_row(
+            name,
+            Text(format_signed(bs_value), style=style_for_value(bs_value)),
+            Text(format_signed(model_value), style=style_for_value(model_value)),
+            Text(format_signed(gap), style=style_for_value(gap, positive="green", negative="red")),
+        )
+    return table
+
+
+def build_plot_panel(state: dict, step: int, spark_width: int) -> Panel:
     price_history = state["prices"][: step + 1]
     bs_history = state["bs_deltas"][: step + 1]
     deep_history = state["deep_deltas"][: step + 1]
-    lines = [
-        f"Price  {ascii_sparkline(price_history, spark_width)}",
-        f"BS     {ascii_sparkline(bs_history, spark_width)}",
-        f"Model  {ascii_sparkline(deep_history, spark_width)}",
-    ]
-    return Panel("\n".join(lines), title="Trajectory", box=box.ROUNDED)
+    pnl_bs = state["bs_total_pnl"][: step + 1]
+    pnl_model = state["deep_total_pnl"][: step + 1]
+    text = Text()
+    text.append("Market path\n", style="bold white")
+    text.append_text(render_plot_lines([("price", price_history, PLOT_STYLES["price"])], spark_width, 5))
+    text.append("\n\n")
+    text.append("Hedge curves\n", style="bold white")
+    text.append_text(
+        render_plot_lines(
+            [
+                ("bs", bs_history, PLOT_STYLES["bs"]),
+                ("model", deep_history, PLOT_STYLES["model"]),
+            ],
+            spark_width,
+            5,
+            y_min=-1.1,
+            y_max=1.1,
+        )
+    )
+    text.append("\n\n")
+    text.append("Cumulative PnL\n", style="bold white")
+    text.append_text(
+        render_plot_lines(
+            [
+                ("bs", pnl_bs, PLOT_STYLES["bs"]),
+                ("model", pnl_model, PLOT_STYLES["model"]),
+            ],
+            spark_width,
+            5,
+        )
+    )
+    return Panel(text, title="Visual Dashboard", box=box.ROUNDED, border_style="cyan")
+
+
+def build_gauge_panel(state: dict, step: int) -> Panel:
+    delta_gap = state["delta_gap"][step]
+    pnl_gap = state["deep_total_pnl"][step] - state["bs_total_pnl"][step]
+    turnover_gap = state["deep_turnover"][step] - state["bs_turnover"][step]
+    content = Group(
+        Text.assemble(
+            ("Model PnL edge ", "bold white"),
+            (format_signed(pnl_gap), style_for_value(pnl_gap, positive="green", negative="red")),
+            "\n",
+            metric_bar(pnl_gap, -2.0, 2.0, 22, style_for_value(pnl_gap, positive="green", negative="red")),
+        ),
+        Text(""),
+        Text.assemble(
+            ("Delta divergence ", "bold white"),
+            (format_signed(delta_gap), style_for_value(delta_gap, positive="magenta", negative="yellow")),
+            "\n",
+            metric_bar(delta_gap, -1.0, 1.0, 22, "magenta"),
+        ),
+        Text(""),
+        Text.assemble(
+            ("Turnover gap ", "bold white"),
+            (format_signed(turnover_gap), style_for_value(-turnover_gap, positive="green", negative="red")),
+            "\n",
+            metric_bar(turnover_gap, -5.0, 5.0, 22, "cyan"),
+        ),
+    )
+    return Panel(content, title="Signals", box=box.ROUNDED, border_style="magenta")
 
 
 def build_recent_steps_table(state: dict, step: int, history_window: int) -> Table:
     table = Table(box=box.SIMPLE_HEAVY)
     table.add_column("Step", justify="right")
     table.add_column("Spot", justify="right")
+    table.add_column("Ret", justify="right")
     table.add_column("BS d", justify="right")
     table.add_column("Model d", justify="right")
+    table.add_column("Gap", justify="right")
     table.add_column("BS PnL", justify="right")
     table.add_column("Model PnL", justify="right")
 
@@ -305,22 +522,30 @@ def build_recent_steps_table(state: dict, step: int, history_window: int) -> Tab
         table.add_row(
             str(row_step),
             format_float(state["prices"][row_step]),
+            Text(format_signed(state["price_returns"][row_step]), style=style_for_value(state["price_returns"][row_step])),
             format_float(state["bs_deltas"][row_step]),
             format_float(state["deep_deltas"][row_step]),
-            format_float(state["bs_total_pnl"][row_step]),
-            format_float(state["deep_total_pnl"][row_step]),
+            Text(format_signed(state["delta_gap"][row_step]), style=style_for_value(state["delta_gap"][row_step], positive="magenta", negative="yellow")),
+            Text(format_signed(state["bs_total_pnl"][row_step]), style=style_for_value(state["bs_total_pnl"][row_step])),
+            Text(format_signed(state["deep_total_pnl"][row_step]), style=style_for_value(state["deep_total_pnl"][row_step])),
         )
     return table
 
 
 def build_footer_panel(state: dict, step: int) -> Panel:
-    delta_gap = state["deep_deltas"][step] - state["bs_deltas"][step]
+    delta_gap = state["delta_gap"][step]
     pnl_gap = state["deep_total_pnl"][step] - state["bs_total_pnl"][step]
+    best_step = max(range(step + 1), key=lambda idx: state["deep_total_pnl"][idx] - state["bs_total_pnl"][idx])
     text = Text()
-    text.append("Model vs BS: ", style="bold")
-    text.append(f"delta gap {delta_gap:.4f}", style="cyan")
+    text.append("Model vs BS: ", style="bold white")
+    text.append(f"delta gap {delta_gap:.4f}", style=style_for_value(delta_gap, positive="magenta", negative="yellow"))
     text.append(" | ")
     text.append(f"PnL gap {pnl_gap:.4f}", style="green" if pnl_gap >= 0 else "red")
+    text.append(" | ", style="white")
+    text.append(
+        f"best edge so far step {best_step} => {state['deep_total_pnl'][best_step] - state['bs_total_pnl'][best_step]:+.4f}",
+        style="bold cyan",
+    )
     return Panel(text, box=box.ROUNDED)
 
 
@@ -331,15 +556,22 @@ def render_dashboard(state: dict, step: int, history_window: int, spark_width: i
         Layout(name="body", ratio=1),
         Layout(name="footer", size=3),
     )
-    layout["body"].split_row(Layout(name="left", ratio=2), Layout(name="right", ratio=1))
-    layout["left"].split_column(Layout(name="trajectory", size=6), Layout(name="recent", ratio=1))
-    layout["right"].split_column(Layout(name="summary", ratio=1), Layout(name="context", ratio=1))
+    layout["body"].split_row(Layout(name="left", ratio=3), Layout(name="right", ratio=2))
+    layout["left"].split_column(Layout(name="plots", size=22), Layout(name="recent", ratio=1))
+    layout["right"].split_column(
+        Layout(name="summary", size=13),
+        Layout(name="gauges", size=14),
+        Layout(name="scorecard", ratio=1),
+        Layout(name="context", ratio=1),
+    )
 
     done = step >= len(state["prices"]) - 1
     layout["header"].update(build_header(state, step, done))
-    layout["trajectory"].update(build_trajectory_panel(state, step, spark_width))
+    layout["plots"].update(build_plot_panel(state, step, spark_width))
     layout["recent"].update(Panel(build_recent_steps_table(state, step, history_window), title="Recent Steps", box=box.ROUNDED))
     layout["summary"].update(Panel(build_summary_table(state, step), title="Step Summary", box=box.ROUNDED))
+    layout["gauges"].update(build_gauge_panel(state, step))
+    layout["scorecard"].update(Panel(build_scorecard_table(state, step), title="Path Metrics", box=box.ROUNDED))
     layout["context"].update(Panel(build_context_table(state), title="Checkpoint Context", box=box.ROUNDED))
     layout["footer"].update(build_footer_panel(state, step))
     return layout

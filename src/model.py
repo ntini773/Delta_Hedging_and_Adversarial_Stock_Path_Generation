@@ -25,12 +25,12 @@ MODEL_SPECS = {
         version="v1",
         features=["spot", "bs_delta", "prev_delta"],
         hidden_dims=[32],
-        transaction_cost_rate=0.0,
+        transaction_cost_rate=0.001,
         default_regime="gbm",
         changes_from_previous=[
             "Matches the notebook feature set: spot, Black-Scholes delta, previous hedge.",
             "Uses a single hidden layer with tanh activations.",
-            "Optimizes terminal CVaR without transaction costs.",
+            "Optimizes terminal CVaR with the same transaction-cost model used by the benchmark.",
         ],
     ),
     "v2": ModelSpec(

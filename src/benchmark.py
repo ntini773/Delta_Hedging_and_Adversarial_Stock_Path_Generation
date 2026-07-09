@@ -132,7 +132,7 @@ def build_summary_table(rows: list[tuple[str, dict[str, float]]]) -> str:
         "Mean P&L",
         "Std Dev",
         "VaR 5%",
-        "CVaR 5%",
+        "Tail Loss 5%",
         "Total Tx Cost",
         "Downside Dev",
     ]
@@ -156,7 +156,10 @@ def build_summary_table(rows: list[tuple[str, dict[str, float]]]) -> str:
     return "\n".join(table)
 
 
-def build_improvement_table(rows: list[tuple[str, dict[str, float]]], baseline: dict[str, float]) -> str:
+def build_improvement_table(
+    rows: list[tuple[str, dict[str, float], str]],
+    baselines: dict[str, dict[str, float]],
+) -> str:
     direction = {
         "mean_pnl": "higher better",
         "std_pnl": "lower better",
@@ -165,11 +168,11 @@ def build_improvement_table(rows: list[tuple[str, dict[str, float]]], baseline: 
         "total_transaction_cost": "lower better",
         "downside_deviation": "lower better",
     }
-    headers = ["Model", "Mean P&L", "Std Dev", "VaR 5%", "CVaR 5%", "Total Tx Cost", "Downside Dev"]
+    headers = ["Model", "Baseline", "Mean P&L", "Std Dev", "VaR 5%", "Tail Loss 5%", "Total Tx Cost", "Downside Dev"]
     table = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
-        "| Metric Direction | "
+        "| Metric Direction | baseline-matched | "
         + " | ".join(
             [
                 direction["mean_pnl"],
@@ -182,18 +185,22 @@ def build_improvement_table(rows: list[tuple[str, dict[str, float]]], baseline: 
         )
         + " |",
     ]
-    for model_name, metrics in rows:
+    for model_name, metrics, baseline_key in rows:
         if model_name.startswith("Black-Scholes"):
             continue
+        baseline = baselines[baseline_key]
         values = []
         for metric in ["mean_pnl", "std_pnl", "var_5", "cvar_5", "total_transaction_cost", "downside_deviation"]:
             baseline_value = baseline[metric]
             if baseline_value == 0:
                 values.append("n/a")
             else:
-                change = 100.0 * (metrics[metric] - baseline_value) / abs(baseline_value)
+                if metric in {"std_pnl", "cvar_5", "total_transaction_cost", "downside_deviation"}:
+                    change = 100.0 * (baseline_value - metrics[metric]) / abs(baseline_value)
+                else:
+                    change = 100.0 * (metrics[metric] - baseline_value) / abs(baseline_value)
                 values.append(f"{change:.2f}%")
-        table.append("| " + " | ".join([model_name] + values) + " |")
+        table.append("| " + " | ".join([model_name, baseline_key] + values) + " |")
     return "\n".join(table)
 
 
@@ -212,6 +219,8 @@ def main() -> None:
         f"- Dataset split: `train {int((1.0 - args.test_ratio - args.validation_ratio) * 100)}% / validation {int(args.validation_ratio * 100)}% / test {int(args.test_ratio * 100)}%`",
         f"- Test set size: `{int(args.num_paths * args.test_ratio)}` paths",
         f"- Random seed: `{args.seed}`",
+        f"- Jump-diffusion intensity: `{25.0}` jumps/year when regime=`jump_diffusion`",
+        f"- Jump mean / std in log space: `-0.02 / 0.08`",
         "",
     ]
 
@@ -237,13 +246,14 @@ def main() -> None:
         )
 
         summary_rows: list[tuple[str, dict[str, float]]] = []
-        baseline_metrics, baseline_pnl = evaluate_bs_baseline(
+        improvement_rows: list[tuple[str, dict[str, float], str]] = []
+        bs_no_cost_metrics, baseline_pnl = evaluate_bs_baseline(
             dataset=dataset_bundle["test"],
             context=dataset_bundle["context"],
             cost_rate=0.0,
             device=args.device,
         )
-        summary_rows.append(("Black-Scholes delta (no tx cost)", baseline_metrics))
+        summary_rows.append(("Black-Scholes delta (no tx cost)", bs_no_cost_metrics))
         raw_pnl_outputs[f"{regime}__bs_no_tx_cost"] = baseline_pnl
 
         bs_cost_metrics, bs_cost_pnl = evaluate_bs_baseline(
@@ -254,6 +264,10 @@ def main() -> None:
         )
         summary_rows.append(("Black-Scholes delta (with tx cost)", bs_cost_metrics))
         raw_pnl_outputs[f"{regime}__bs_with_tx_cost"] = bs_cost_pnl
+        baselines = {
+            "Black-Scholes delta (no tx cost)": bs_no_cost_metrics,
+            "Black-Scholes delta (with tx cost)": bs_cost_metrics,
+        }
 
         missing_models = []
         skipped_models: list[str] = []
@@ -274,6 +288,12 @@ def main() -> None:
                 device=args.device,
             )
             summary_rows.append((metadata["model_name"], metrics))
+            baseline_key = (
+                "Black-Scholes delta (with tx cost)"
+                if metadata["transaction_cost_rate"] > 0.0
+                else "Black-Scholes delta (no tx cost)"
+            )
+            improvement_rows.append((metadata["model_name"], metrics, baseline_key))
             raw_pnl_outputs[f"{regime}__{metadata['model_name']}"] = pnl
 
         report_sections.extend(
@@ -282,9 +302,9 @@ def main() -> None:
                 "",
                 build_summary_table(summary_rows),
                 "",
-                "### Improvement vs Black-Scholes baseline",
+                "### Improvement vs Matched Black-Scholes baseline",
                 "",
-                build_improvement_table(summary_rows, baseline_metrics),
+                build_improvement_table(improvement_rows, baselines),
                 "",
             ]
         )
@@ -318,6 +338,11 @@ def main() -> None:
             report_sections.append(f"- Hidden dims: `{metadata['hidden_dims']}`")
             report_sections.append(f"- Transaction cost rate: `{metadata['transaction_cost_rate']}`")
             report_sections.append(f"- Default regime: `{metadata['dataset_config']['regime']}`")
+            if metadata["dataset_config"].get("regime") == "jump_diffusion":
+                report_sections.append(
+                    f"- Jump params: intensity={metadata['dataset_config'].get('jump_intensity')}, "
+                    f"mean={metadata['dataset_config'].get('jump_mean')}, std={metadata['dataset_config'].get('jump_std')}"
+                )
             report_sections.append(f"- Run tag: `{metadata.get('run_tag', '')}`")
         report_sections.append("")
 

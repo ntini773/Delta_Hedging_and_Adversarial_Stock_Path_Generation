@@ -10,6 +10,7 @@ Minimal PyTorch implementation of the workflow from `HFT_CAMP_CODE.ipynb`, split
 - `src/data.py`: CSV loading, symbol parsing, market context, GBM and jump-diffusion paths, feature builders
 - `src/train.py`: train a selected model version and save checkpoint + metadata
 - `src/benchmark.py`: load saved checkpoints only and write `BENCHMARK.md`
+- `src/infer_tui.py`: Rich terminal dashboard for single-path inference on the benchmark test split
 
 ## Model Versions
 
@@ -67,6 +68,18 @@ Run the benchmark from saved checkpoints:
 
 ```bash
 bash scripts/run_benchmark.sh
+```
+
+Run the Rich TUI for one test-set path:
+
+```bash
+python -m src.infer_tui --model-version v3 --path-index 0
+```
+
+Or with the helper script:
+
+```bash
+bash scripts/run_inference_tui.sh
 ```
 
 Both scripts accept overrides through environment variables such as `NUM_PATHS`, `EPOCHS`, `BATCH_SIZE`, `CHECKPOINT_DIR`, and `BENCHMARK_DIR`.

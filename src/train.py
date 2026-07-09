@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 from src.data import FEATURE_BUILDERS, prepare_dataset_bundle, to_torch
 from src.loss import calculate_cvar, calculate_cvar_loss, calculate_downside_deviation, calculate_hedging_pnl, calculate_var
@@ -31,7 +32,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output-dir", default="artifacts/checkpoints")
     parser.add_argument("--run-tag", default="")
+    parser.add_argument("--wandb-project", default="")
+    parser.add_argument("--wandb-entity", default="")
+    parser.add_argument("--wandb-mode", default="online", choices=["online", "offline", "disabled"])
     return parser.parse_args()
+
+
+def maybe_init_wandb(args: argparse.Namespace, spec, dataset_config: dict):
+    project = args.wandb_project
+    if not project or args.wandb_mode == "disabled":
+        return None
+    try:
+        import wandb
+    except ImportError as exc:
+        raise RuntimeError("Weights & Biases logging was requested, but `wandb` is not installed.") from exc
+
+    run_name = f"{spec.name}-{args.run_tag or datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}"
+    return wandb.init(
+        project=project,
+        entity=args.wandb_entity or None,
+        mode=args.wandb_mode,
+        name=run_name,
+        config={
+            "model_version": args.model_version,
+            "hidden_dims": spec.hidden_dims,
+            "transaction_cost_rate": spec.transaction_cost_rate,
+            "learning_rate": args.learning_rate,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "dataset": dataset_config,
+            "run_tag": args.run_tag,
+        },
+    )
 
 
 def evaluate_model(
@@ -103,6 +135,7 @@ def main() -> None:
     )
     spec = MODEL_SPECS[args.model_version]
     device = args.device
+    wandb_run = maybe_init_wandb(args, spec, dataset_bundle["config"])
 
     model = build_model(args.model_version).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -121,10 +154,14 @@ def main() -> None:
     best_epoch = -1
     best_state_dict = None
     best_validation_metrics = None
+    best_train_loss = None
 
     for epoch in range(args.epochs):
         permutation = torch.randperm(train_paths.shape[0], generator=generator)
         epoch_losses = []
+        epoch_cvar_losses = []
+        epoch_alignment_losses = []
+        epoch_turnover_losses = []
         for start in range(0, train_paths.shape[0], args.batch_size):
             batch_indices = permutation[start : start + args.batch_size]
             batch_paths = train_paths[batch_indices]
@@ -151,12 +188,26 @@ def main() -> None:
                 option_type=dataset_bundle["context"]["option_type"],
                 transaction_cost_rate=spec.transaction_cost_rate,
             )
-            loss = calculate_cvar_loss(pnl, alpha=0.05)
+            cvar_loss = calculate_cvar_loss(pnl, alpha=0.05)
+
+            progress = epoch / max(args.epochs - 1, 1)
+            alignment_weight = spec.alignment_weight * (1.0 - 0.8 * progress)
+            alignment_loss = F.smooth_l1_loss(hedge_paths, batch_bs_deltas) if alignment_weight > 0.0 else torch.zeros((), device=device)
+            turnover_loss = (
+                torch.mean(torch.abs(torch.diff(hedge_paths, dim=1)))
+                if spec.turnover_weight > 0.0 and hedge_paths.shape[1] > 1
+                else torch.zeros((), device=device)
+            )
+            loss = cvar_loss + alignment_weight * alignment_loss + spec.turnover_weight * turnover_loss
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             epoch_losses.append(float(loss.item()))
+            epoch_cvar_losses.append(float(cvar_loss.item()))
+            epoch_alignment_losses.append(float(alignment_loss.item()))
+            epoch_turnover_losses.append(float(turnover_loss.item()))
 
         validation_eval = evaluate_model(
             model=model,
@@ -173,12 +224,29 @@ def main() -> None:
             best_epoch = epoch + 1
             best_state_dict = copy.deepcopy(model.state_dict())
             best_validation_metrics = validation_eval["metrics"]
+            best_train_loss = sum(epoch_losses) / len(epoch_losses)
 
         print(
             f"Epoch {epoch + 1:03d}/{args.epochs}: "
-            f"train CVaR loss = {sum(epoch_losses) / len(epoch_losses):.6f}, "
+            f"train loss = {sum(epoch_losses) / len(epoch_losses):.6f}, "
+            f"train CVaR = {sum(epoch_cvar_losses) / len(epoch_cvar_losses):.6f}, "
             f"validation CVaR = {validation_cvar:.6f}"
         )
+        if wandb_run is not None:
+            wandb_run.log(
+                {
+                    "epoch": epoch + 1,
+                    "train/loss": sum(epoch_losses) / len(epoch_losses),
+                    "train/cvar_loss": sum(epoch_cvar_losses) / len(epoch_cvar_losses),
+                    "train/alignment_loss": sum(epoch_alignment_losses) / len(epoch_alignment_losses),
+                    "train/turnover_loss": sum(epoch_turnover_losses) / len(epoch_turnover_losses),
+                    "validation/cvar_5": validation_cvar,
+                    "validation/mean_pnl": validation_eval["metrics"]["mean_pnl"],
+                    "validation/std_pnl": validation_eval["metrics"]["std_pnl"],
+                    "validation/downside_deviation": validation_eval["metrics"]["downside_deviation"],
+                    "best_validation/cvar_5": best_validation_cvar,
+                }
+            )
 
     if best_state_dict is None:
         raise RuntimeError("Training finished without selecting a best validation checkpoint.")
@@ -233,6 +301,7 @@ def main() -> None:
         "dataset_config": dataset_bundle["config"],
         "context": serializable_context,
         "best_epoch": best_epoch,
+        "best_train_loss": best_train_loss,
         "selection_metric": "validation_cvar_5",
         "train_metrics": train_eval["metrics"],
         "validation_metrics": validation_eval["metrics"],
@@ -266,6 +335,13 @@ def main() -> None:
     print("\nTest metrics:")
     for key, value in test_eval["metrics"].items():
         print(f"  {key}: {value:.6f}")
+    if wandb_run is not None:
+        wandb_run.summary["best_epoch"] = best_epoch
+        wandb_run.summary["best_train_loss"] = best_train_loss
+        wandb_run.summary["test_mean_pnl"] = test_eval["metrics"]["mean_pnl"]
+        wandb_run.summary["test_cvar_5"] = test_eval["metrics"]["cvar_5"]
+        wandb_run.summary["test_downside_deviation"] = test_eval["metrics"]["downside_deviation"]
+        wandb_run.finish()
 
 
 if __name__ == "__main__":

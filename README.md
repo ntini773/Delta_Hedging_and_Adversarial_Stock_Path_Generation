@@ -17,6 +17,7 @@ Minimal PyTorch implementation of the workflow from `HFT_CAMP_CODE.ipynb`, split
 - `v1`: notebook-style policy with inputs `spot`, `bs_delta`, `prev_delta`
 - `v2`: adds `log_moneyness`, `time_to_expiry`, `implied_volatility`, and transaction costs
 - `v3`: deeper MLP with richer state features and jump-diffusion as the default training regime
+- `v4`: residual hedge around Black-Scholes delta with normalized features and regularized training
 
 ## Train Commands
 
@@ -36,6 +37,12 @@ Train `v3` on jump-diffusion:
 
 ```bash
 python -m src.train --model-version v3 --regime jump_diffusion
+```
+
+Train `v4` on jump-diffusion:
+
+```bash
+python -m src.train --model-version v4 --regime jump_diffusion
 ```
 
 Checkpoints are written to `artifacts/checkpoints/`.
@@ -58,7 +65,7 @@ This writes:
 
 ## Bash Scripts
 
-Train `v1`, `v2`, and `v3` in parallel on GPUs `0`, `1`, and `2`:
+Train `v1`, `v2`, `v3`, and `v4` with a 3-GPU schedule:
 
 ```bash
 bash scripts/train_all_models.sh
@@ -68,6 +75,18 @@ Run the benchmark from saved checkpoints:
 
 ```bash
 bash scripts/run_benchmark.sh
+```
+
+Wipe old checkpoints and benchmark artifacts:
+
+```bash
+bash scripts/clean_checkpoints.sh
+```
+
+Run a full clean retrain + benchmark flow:
+
+```bash
+bash scripts/rerun_training.sh
 ```
 
 Run the Rich TUI for one test-set path:
@@ -83,6 +102,7 @@ bash scripts/run_inference_tui.sh
 ```
 
 Both scripts accept overrides through environment variables such as `NUM_PATHS`, `EPOCHS`, `BATCH_SIZE`, `CHECKPOINT_DIR`, and `BENCHMARK_DIR`.
+For Weights & Biases logging, set `WANDB_PROJECT`, optionally `WANDB_ENTITY`, and `WANDB_MODE=online` before running training.
 
 Default `NUM_PATHS` in both bash scripts is `10000`.
 The training script writes a shared `RUN_TAG`, and the benchmark script reuses it so only checkpoints from the same coordinated run are compared by default.

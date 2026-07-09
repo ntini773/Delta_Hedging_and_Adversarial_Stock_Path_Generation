@@ -15,6 +15,8 @@ class ModelSpec:
     transaction_cost_rate: float
     default_regime: str
     changes_from_previous: list[str]
+    alignment_weight: float = 0.0
+    turnover_weight: float = 0.0
 
 
 MODEL_SPECS = {
@@ -68,6 +70,36 @@ MODEL_SPECS = {
             "Uses a deeper three-layer MLP for a richer hedge policy without introducing recurrent layers.",
             "Intended to be trained on jump-diffusion paths while keeping the same benchmark interface.",
         ],
+        turnover_weight=0.001,
+    ),
+    "v4": ModelSpec(
+        name="deep_hedger_v4",
+        version="v4",
+        features=[
+            "log_moneyness",
+            "sqrt_time_to_expiry",
+            "bs_delta",
+            "delta_gap_to_prev",
+            "scaled_bs_gamma",
+            "scaled_bs_theta",
+            "scaled_bs_vega",
+            "implied_volatility",
+            "realized_volatility",
+            "instant_log_return",
+            "running_pnl_scaled",
+            "step_fraction",
+            "prev_delta",
+        ],
+        hidden_dims=[256, 256, 128],
+        transaction_cost_rate=0.001,
+        default_regime="jump_diffusion",
+        changes_from_previous=[
+            "Predicts a residual adjustment on top of Black-Scholes delta instead of an unconstrained absolute hedge.",
+            "Uses normalized market-state features so the policy is less likely to collapse to a flat hedge.",
+            "Adds alignment and turnover regularization to keep training stable on large synthetic batches.",
+        ],
+        alignment_weight=0.05,
+        turnover_weight=0.002,
     ),
 }
 
@@ -89,8 +121,30 @@ class DeepHedgerMLP(nn.Module):
         return self.network(features)
 
 
+class ResidualDeepHedgerMLP(nn.Module):
+    uses_base_delta = True
+
+    def __init__(self, input_dim: int, hidden_dims: list[int], residual_scale: float = 0.35):
+        super().__init__()
+        layers: list[nn.Module] = [nn.LayerNorm(input_dim)]
+        current_dim = input_dim
+        for hidden_dim in hidden_dims:
+            layers.append(nn.Linear(current_dim, hidden_dim))
+            layers.append(nn.SiLU())
+            current_dim = hidden_dim
+        layers.append(nn.Linear(current_dim, 1))
+        self.network = nn.Sequential(*layers)
+        self.residual_scale = residual_scale
+
+    def forward(self, features: torch.Tensor, base_delta: torch.Tensor) -> torch.Tensor:
+        residual = self.residual_scale * torch.tanh(self.network(features))
+        return torch.clamp(base_delta + residual, min=-1.0, max=1.0)
+
+
 def build_model(model_version: str) -> nn.Module:
     spec = MODEL_SPECS[model_version]
+    if model_version == "v4":
+        return ResidualDeepHedgerMLP(input_dim=len(spec.features), hidden_dims=spec.hidden_dims)
     return DeepHedgerMLP(input_dim=len(spec.features), hidden_dims=spec.hidden_dims)
 
 
@@ -116,6 +170,7 @@ def run_deep_hedger(
     hedge_steps = []
 
     for step in range(num_time_points):
+        current_bs_delta = bs_deltas[:, step : step + 1]
         features = feature_builder(
             price_paths=price_paths,
             bs_deltas=bs_deltas,
@@ -129,7 +184,10 @@ def run_deep_hedger(
             running_pnl=running_pnl,
             step=step,
         )
-        current_delta = model(features)
+        if getattr(model, "uses_base_delta", False):
+            current_delta = model(features, base_delta=current_bs_delta)
+        else:
+            current_delta = model(features)
         hedge_steps.append(current_delta)
         if step < num_time_points - 1:
             price_change = price_paths[:, step + 1 : step + 2] - price_paths[:, step : step + 1]

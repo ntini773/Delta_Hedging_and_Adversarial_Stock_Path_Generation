@@ -11,6 +11,7 @@ numpy = { version = "*", channel = "conda-forge" }
 scipy = { version = "*", channel = "conda-forge" }
 pandas = { version = "*", channel = "conda-forge" }
 rich = { version = "*", channel = "conda-forge" }
+wandb = { version = "*", channel = "conda-forge" }
 pytorch = { version = "*", channel = "pytorch" }
 
 [feature.cuda.dependencies]
@@ -19,6 +20,7 @@ numpy = { version = "*", channel = "conda-forge" }
 scipy = { version = "*", channel = "conda-forge" }
 pandas = { version = "*", channel = "conda-forge" }
 rich = { version = "*", channel = "conda-forge" }
+wandb = { version = "*", channel = "conda-forge" }
 pytorch = { version = "*", channel = "pytorch" }
 
 [feature.cuda.target.linux-64.dependencies]

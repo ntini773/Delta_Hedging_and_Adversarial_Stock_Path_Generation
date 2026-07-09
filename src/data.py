@@ -100,15 +100,15 @@ def generate_gbm_paths(
     volatility: float,
     seed: int,
 ) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    paths = np.zeros((num_paths, num_steps + 1), dtype=np.float32)
-    paths[:, 0] = start_price
-    for step in range(1, num_steps + 1):
-        shocks = rng.standard_normal(num_paths)
-        paths[:, step] = paths[:, step - 1] * np.exp(
-            (drift - 0.5 * volatility * volatility) * dt + volatility * math.sqrt(dt) * shocks
-        )
-    return paths
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    shocks = torch.randn((num_paths, num_steps), generator=generator, dtype=torch.float32)
+    log_returns = (drift - 0.5 * volatility * volatility) * dt + volatility * math.sqrt(dt) * shocks
+    cumulative_log_returns = torch.cumsum(log_returns, dim=1)
+    paths = torch.empty((num_paths, num_steps + 1), dtype=torch.float32)
+    paths[:, 0] = float(start_price)
+    paths[:, 1:] = float(start_price) * torch.exp(cumulative_log_returns)
+    return paths.numpy()
 
 
 def generate_jump_diffusion_paths(
@@ -123,22 +123,30 @@ def generate_jump_diffusion_paths(
     jump_std: float,
     seed: int,
 ) -> np.ndarray:
-    rng = np.random.default_rng(seed)
-    paths = np.zeros((num_paths, num_steps + 1), dtype=np.float32)
-    paths[:, 0] = start_price
     jump_drift = jump_intensity * (math.exp(jump_mean + 0.5 * jump_std * jump_std) - 1.0)
-    for step in range(1, num_steps + 1):
-        diffusion_shocks = rng.standard_normal(num_paths)
-        jump_counts = rng.poisson(jump_intensity * dt, size=num_paths)
-        jump_sizes = np.where(
-            jump_counts > 0,
-            np.exp(jump_counts * jump_mean + np.sqrt(jump_counts) * jump_std * rng.standard_normal(num_paths)),
-            1.0,
-        )
-        paths[:, step] = paths[:, step - 1] * np.exp(
-            (drift - jump_drift - 0.5 * volatility * volatility) * dt + volatility * math.sqrt(dt) * diffusion_shocks
-        ) * jump_sizes
-    return paths
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    diffusion_shocks = torch.randn((num_paths, num_steps), generator=generator, dtype=torch.float32)
+    jump_counts = torch.poisson(
+        torch.full((num_paths, num_steps), fill_value=jump_intensity * dt, dtype=torch.float32),
+        generator=generator,
+    )
+    jump_noise = torch.randn((num_paths, num_steps), generator=generator, dtype=torch.float32)
+    jump_log_sizes = torch.where(
+        jump_counts > 0,
+        jump_counts * jump_mean + torch.sqrt(jump_counts) * jump_std * jump_noise,
+        torch.zeros_like(jump_counts),
+    )
+    log_returns = (
+        (drift - jump_drift - 0.5 * volatility * volatility) * dt
+        + volatility * math.sqrt(dt) * diffusion_shocks
+        + jump_log_sizes
+    )
+    cumulative_log_returns = torch.cumsum(log_returns, dim=1)
+    paths = torch.empty((num_paths, num_steps + 1), dtype=torch.float32)
+    paths[:, 0] = float(start_price)
+    paths[:, 1:] = float(start_price) * torch.exp(cumulative_log_returns)
+    return paths.numpy()
 
 
 def compute_black_scholes_reference(
@@ -451,8 +459,64 @@ def build_v3_features(
     )
 
 
+def build_v4_features(
+    price_paths: torch.Tensor,
+    bs_deltas: torch.Tensor,
+    bs_gammas: torch.Tensor,
+    bs_thetas: torch.Tensor,
+    bs_vegas: torch.Tensor,
+    time_to_expiry: torch.Tensor,
+    implied_volatility: torch.Tensor,
+    strike: float,
+    previous_delta: torch.Tensor,
+    running_pnl: torch.Tensor,
+    step: int,
+) -> torch.Tensor:
+    spot = price_paths[:, step : step + 1]
+    remaining_time = time_to_expiry[:, step : step + 1]
+    bs_delta = bs_deltas[:, step : step + 1]
+    bs_gamma = bs_gammas[:, step : step + 1]
+    bs_theta = bs_thetas[:, step : step + 1]
+    bs_vega = bs_vegas[:, step : step + 1]
+    iv = implied_volatility[:, step : step + 1]
+    log_moneyness = torch.log(torch.clamp(spot / strike, min=1e-8))
+    sqrt_time = torch.sqrt(torch.clamp(remaining_time, min=0.0))
+    realized_volatility = calculate_realized_volatility(price_paths, step=step)
+    step_fraction = torch.full_like(remaining_time, fill_value=step / max(price_paths.shape[1] - 1, 1))
+    running_pnl_scaled = running_pnl / max(float(strike), 1e-8)
+    delta_gap_to_prev = previous_delta - bs_delta
+    scaled_bs_gamma = bs_gamma * spot
+    scaled_bs_theta = bs_theta * torch.clamp(remaining_time, min=1e-6)
+    scaled_bs_vega = bs_vega / max(float(strike), 1e-8)
+    if step == 0:
+        instant_log_return = torch.zeros_like(spot)
+    else:
+        previous_spot = price_paths[:, step - 1 : step]
+        instant_log_return = torch.log(torch.clamp(spot / previous_spot, min=1e-8))
+
+    return torch.cat(
+        [
+            log_moneyness,
+            sqrt_time,
+            bs_delta,
+            delta_gap_to_prev,
+            scaled_bs_gamma,
+            scaled_bs_theta,
+            scaled_bs_vega,
+            iv,
+            realized_volatility,
+            instant_log_return,
+            running_pnl_scaled,
+            step_fraction,
+            previous_delta,
+        ],
+        dim=1,
+    )
+
+
 FEATURE_BUILDERS = {
     "v1": build_v1_features,
     "v2": build_v2_features,
     "v3": build_v3_features,
+    "v4": build_v4_features,
 }
